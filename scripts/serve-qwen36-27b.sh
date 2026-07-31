@@ -42,6 +42,7 @@ case "$profile" in
     [[ -f "$model_path/mtp.safetensors" ]] || die "MTP weights not found"
     profile_args=(
       --disable-prefill-cuda-graph
+      --disable-radix-cache
       --page-size "${PAGE_SIZE:-64}"
       --speculative-algorithm EAGLE
       --speculative-num-steps "${MTP_STEPS:-3}"
@@ -57,7 +58,44 @@ case "$profile" in
     chunked_prefill_size="${CHUNKED_PREFILL_SIZE:-2048}"
     max_prefill_tokens="${MAX_PREFILL_TOKENS:-4096}"
     cuda_graph_max_bs_decode="${CUDA_GRAPH_MAX_BS_DECODE:-1}"
-    profile_args=(--disable-prefill-cuda-graph)
+    profile_args=(
+      --disable-prefill-cuda-graph
+      --disable-radix-cache
+      --page-size "${PAGE_SIZE:-64}"
+    )
+    ;;
+  mtp-c4)
+    context_length="${CONTEXT_LENGTH:-24576}"
+    mem_fraction_static="${MEM_FRACTION_STATIC:-0.98}"
+    max_total_tokens="${MAX_TOTAL_TOKENS:-20480}"
+    max_running_requests="${MAX_RUNNING_REQUESTS:-4}"
+    chunked_prefill_size="${CHUNKED_PREFILL_SIZE:-2048}"
+    max_prefill_tokens="${MAX_PREFILL_TOKENS:-4096}"
+    cuda_graph_max_bs_decode="${CUDA_GRAPH_MAX_BS_DECODE:-4}"
+    [[ -f "$model_path/mtp.safetensors" ]] || die "MTP weights not found"
+    profile_args=(
+      --disable-prefill-cuda-graph
+      --disable-radix-cache
+      --page-size "${PAGE_SIZE:-64}"
+      --speculative-algorithm EAGLE
+      --speculative-num-steps "${MTP_STEPS:-3}"
+      --speculative-eagle-topk "${MTP_TOPK:-1}"
+      --speculative-num-draft-tokens "${MTP_DRAFT_TOKENS:-4}"
+    )
+    ;;
+  baseline-c4)
+    context_length="${CONTEXT_LENGTH:-24576}"
+    mem_fraction_static="${MEM_FRACTION_STATIC:-0.88}"
+    max_total_tokens="${MAX_TOTAL_TOKENS:-20480}"
+    max_running_requests="${MAX_RUNNING_REQUESTS:-4}"
+    chunked_prefill_size="${CHUNKED_PREFILL_SIZE:-2048}"
+    max_prefill_tokens="${MAX_PREFILL_TOKENS:-4096}"
+    cuda_graph_max_bs_decode="${CUDA_GRAPH_MAX_BS_DECODE:-4}"
+    profile_args=(
+      --disable-prefill-cuda-graph
+      --disable-radix-cache
+      --page-size "${PAGE_SIZE:-64}"
+    )
     ;;
   prefill)
     context_length="${CONTEXT_LENGTH:-32768}"
@@ -80,7 +118,7 @@ case "$profile" in
     profile_args=(--disable-prefill-cuda-graph --enable-mixed-chunk)
     ;;
   *)
-    die "unknown PROFILE=$profile (expected mtp, baseline, prefill, throughput)"
+    die "unknown PROFILE=$profile (expected mtp, baseline, mtp-c4, baseline-c4, prefill, throughput)"
     ;;
 esac
 

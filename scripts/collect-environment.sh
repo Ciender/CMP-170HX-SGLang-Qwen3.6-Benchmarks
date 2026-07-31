@@ -12,6 +12,9 @@ echo "os=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '\"')"
 echo "cpu=$(lscpu | sed -n 's/^Model name:[[:space:]]*//p' | head -n 1)"
 echo "logical_cpus=$(nproc)"
 echo "memory=$(free -h | awk '/^Mem:/ {print $2}')"
+echo "swap_total=$(free -b | awk '/^Swap:/ {print $2}')"
+echo "swap_used=$(free -b | awk '/^Swap:/ {print $3}')"
+echo "vm_overcommit_memory=$(sysctl -n vm.overcommit_memory)"
 
 pci_bus="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -n 1)"
 nvidia-smi \
@@ -40,4 +43,14 @@ if [[ -f "$model_path/config.json" ]]; then
 fi
 if [[ -f "$model_path/generation_config.json" ]]; then
   sha256sum "$model_path/generation_config.json"
+fi
+
+if [[ -n "${SGLANG_SOURCE:-}" ]] && git -C "$SGLANG_SOURCE" rev-parse HEAD >/dev/null 2>&1; then
+  echo "sglang_source=$SGLANG_SOURCE"
+  echo "sglang_source_commit=$(git -C "$SGLANG_SOURCE" rev-parse HEAD)"
+  if [[ -n "$(git -C "$SGLANG_SOURCE" status --porcelain)" ]]; then
+    echo "sglang_source_dirty=true"
+  else
+    echo "sglang_source_dirty=false"
+  fi
 fi

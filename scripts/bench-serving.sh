@@ -52,6 +52,50 @@ run_case() {
     --warmup-requests "$warmup_requests" \
     --flush-cache \
     --seed 42 \
+    --temperature 0.0 \
+    --top-p 1.0 \
+    --tag "$run_tag" \
+    --output-details \
+    --output-file "$output_file" \
+    --disable-tqdm
+}
+
+run_dataset_case() {
+  local name="$1"
+  local dataset_name="$2"
+  local dataset_path="$3"
+  local concurrency="$4"
+  local prompts="$5"
+  local context_len="$6"
+  local fixed_output_len="$7"
+  local warmup_requests="${WARMUP_REQUESTS:-0}"
+  local output_file="$results_dir/${run_tag}-${name}-c${concurrency}.jsonl"
+  local dataset_args=(
+    --dataset-name "$dataset_name"
+    --sharegpt-context-len "$context_len"
+  )
+
+  if [[ -n "$dataset_path" ]]; then
+    dataset_args+=(--dataset-path "$dataset_path")
+  fi
+  if [[ -n "$fixed_output_len" ]]; then
+    dataset_args+=(--sharegpt-output-len "$fixed_output_len")
+  fi
+
+  "$venv_dir/bin/python" -m sglang.benchmark.serving \
+    --backend sglang-oai \
+    --base-url "$base_url" \
+    "${dataset_args[@]}" \
+    --model "$model_path" \
+    --tokenizer "$model_path" \
+    --num-prompts "$prompts" \
+    --max-concurrency "$concurrency" \
+    --warmup-requests "$warmup_requests" \
+    --flush-cache \
+    --seed 42 \
+    --temperature 0.0 \
+    --top-p 1.0 \
+    --tag "$run_tag" \
     --output-details \
     --output-file "$output_file" \
     --disable-tqdm
@@ -72,6 +116,17 @@ case "$mode" in
     run_case "mixed-$mixed_input_len-$mixed_output_len" \
       "$mixed_input_len" "$mixed_output_len" "$concurrency" "$prompts"
     ;;
+  dataset)
+    dataset_name="${DATASET_NAME:?DATASET_NAME is required for dataset mode}"
+    dataset_path="${DATASET_PATH:-}"
+    concurrency="${MAX_CONCURRENCY:-1}"
+    prompts="${DATASET_PROMPTS:-30}"
+    context_len="${DATASET_CONTEXT_LEN:-24576}"
+    fixed_output_len="${DATASET_OUTPUT_LEN:-}"
+    run_dataset_case "$dataset_name${fixed_output_len:+-fixed-$fixed_output_len}" \
+      "$dataset_name" "$dataset_path" "$concurrency" "$prompts" \
+      "$context_len" "$fixed_output_len"
+    ;;
   all)
     run_case "prefill-$prefill_input_len-$prefill_output_len" \
       "$prefill_input_len" "$prefill_output_len" 1 "${PREFILL_PROMPTS:-5}"
@@ -83,7 +138,7 @@ case "$mode" in
       "$mixed_input_len" "$mixed_output_len" "$concurrency" "$prompts"
     ;;
   *)
-    echo "usage: $0 {prefill|decode|mixed|all}" >&2
+    echo "usage: $0 {prefill|decode|mixed|dataset|all}" >&2
     exit 2
     ;;
 esac

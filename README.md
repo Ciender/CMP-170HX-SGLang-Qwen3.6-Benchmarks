@@ -1,158 +1,271 @@
-# CMP 170HX + SGLang Qwen3.6-27B W8A8 Benchmarks
+# CMP 170HX + SGLang + Qwen3.6-27B W8A8 Benchmark
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Reproducible single-GPU serving benchmarks for Qwen3.6-27B-INT8-W8A8 on an
-NVIDIA CMP 170HX (GA100, SM80, 40 GiB) with SGLang. This repository contains
-the exact launch profiles, benchmark driver, 250 W result tables, and raw 200 ms
-power telemetry used for the measurements on July 31, 2026.
+Single-GPU baseline versus MTP serving results for
+`Qwen3.6-27B-INT8-W8A8` on a 40 GiB NVIDIA CMP 170HX (GA100, SM80), using
+SGLang 0.5.16 at a verified 250 W power limit. The canonical run is
+`expanded-250w-v2-20260731`; all tables below come from that run.
 
-## Scope
+## Benchmark results
 
-This is a hardware profile and benchmark repository, not a new MTP kernel port.
-SGLang 0.5.16 already contains the Qwen3.5/Qwen3.6 MTP model path and EAGLE
-speculative decoding support. Qwen3.6 uses the internal architecture name
-`Qwen3_5ForConditionalGeneration`. The work here is:
+### Headline findings
 
-- a memory-safe SM80 launch profile for the 40 GiB CMP 170HX;
-- controlled MTP versus non-MTP measurements on identical requests;
-- separate profiles for prefill and concurrency-four throughput;
-- deterministic benchmark and cache handling;
-- synchronized NVML power, clock, utilization, and temperature telemetry.
+- At concurrency one, MTP improves end-to-end output throughput by
+  **1.79x-2.27x** across the valid 1K-20K input and 1K-8K output matrix.
+- Steady decode, calculated as `1000 / mean TPOT`, improves by
+  **1.91x-2.30x**. Mean MTP acceptance length is 2.91-3.50 tokens.
+- With four concurrent requests, MTP improves aggregate output throughput by
+  **1.65x-1.89x** on the five capacity-safe cases.
+- MTP does not accelerate prefill. Median TTFT is 4.8%-12.7% higher than the
+  non-MTP profile on the six-point prefill curve.
+- On real ShareGPT requests, MTP improves output throughput by **1.87x** at
+  concurrency one and **1.68x** at concurrency four. On LongBench-v2 with a
+  fixed 512-token generation, it improves end-to-end throughput by **1.59x**.
 
-No source from `vllm-dsa-mtp-sm80` is copied. That project targets vLLM,
-DeepSeek/GLM sparse attention, and related SM80 paths. This checkpoint is a
-dense hybrid GDN model and uses SGLang's existing SM80 Triton GDN kernels.
+### Single-request generation
 
-## Main findings
+Each cell contains three completed requests. `Off / MTP` columns compare the
+same exact input length, output length, seed, and sampling parameters.
 
-- MTP delivers **1.96x to 2.03x** output throughput on 128-token prompts with
-  128-512 generated tokens at concurrency one.
-- MTP reduces mean TPOT from about **23.9 ms to 11.0-11.5 ms**. Short-prompt
-  TTFT increases by 13-43 ms.
-- At 10K and 20K input tokens, end-to-end output throughput improves by 1.40x
-  and 1.22x. Prefill dominates those requests even though decode TPOT is still
-  approximately halved.
-- The non-MTP concurrency-four profile reaches **132.95 output tok/s** on 20
-  fixed 1024/256 requests.
-- The 8K prefill case sustains **4573.80 input tok/s**, or 98.6% of the 4K
-  result, while spanning two 4096-token chunks.
+| Input/output | E2E output tok/s, Off / MTP | E2E speedup | Steady decode tok/s, Off / MTP | Mean TTFT, Off / MTP | Mean TPOT, Off / MTP | MTP accept length |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1024/1024 | 41.60 / 80.07 | 1.92x | 42.00 / 81.78 | 247.5 / 268.7 ms | 23.81 / 12.23 ms | 2.96 |
+| 1024/4096 | 41.77 / 87.19 | 2.09x | 41.87 / 87.69 | 251.9 / 271.1 ms | 23.88 / 11.40 ms | 3.18 |
+| 1024/8192 | 41.62 / 90.26 | 2.17x | 41.68 / 90.54 | 265.4 / 276.6 ms | 23.99 / 11.04 ms | 3.31 |
+| 4096/1024 | 40.24 / 74.09 | 1.84x | 41.71 / 79.69 | 911.3 / 970.9 ms | 23.98 / 12.55 ms | 2.91 |
+| 4096/4096 | 41.19 / 83.85 | 2.04x | 41.57 / 85.56 | 918.5 / 972.3 ms | 24.06 / 11.69 ms | 3.12 |
+| 4096/8192 | 41.19 / 91.74 | 2.23x | 41.38 / 92.78 | 928.0 / 994.1 ms | 24.17 / 10.78 ms | 3.41 |
+| 8192/1024 | 38.49 / 74.44 | 1.93x | 41.38 / 86.83 | 1869.6 / 1961.4 ms | 24.17 / 11.52 ms | 3.20 |
+| 8192/4096 | 40.46 / 86.17 | 2.13x | 41.23 / 89.89 | 1890.3 / 1964.2 ms | 24.26 / 11.12 ms | 3.32 |
+| 8192/8192 | 40.67 / 92.36 | 2.27x | 41.05 / 94.45 | 1874.4 / 1968.3 ms | 24.36 / 10.59 ms | 3.50 |
+| 20480/1024 | 33.68 / 60.38 | 1.79x | 40.42 / 87.74 | 5083.8 / 5289.5 ms | 24.74 / 11.40 ms | 3.32 |
 
-## Test time
+### Prefill curve
 
-Measured request window:
+Each cell contains three requests and exactly one generated token. MTP loads a
+draft worker but cannot use speculative decoding to accelerate prompt prefill.
+
+| Input tokens | Input tok/s, Off / MTP | Median TTFT, Off / MTP | MTP TTFT change |
+| ---: | ---: | ---: | ---: |
+| 512 | 2326.17 / 2119.08 | 207.74 / 234.02 ms | +12.7% |
+| 2048 | 4428.56 / 4122.16 | 444.77 / 486.97 ms | +9.5% |
+| 4096 | 4561.56 / 4296.73 | 881.46 / 937.63 ms | +6.4% |
+| 8192 | 4460.70 / 4245.31 | 1809.20 / 1905.02 ms | +5.3% |
+| 12288 | 4356.72 / 4142.83 | 2800.57 / 2946.06 ms | +5.2% |
+| 20480 | 4112.76 / 3911.91 | 4968.85 / 5207.51 ms | +4.8% |
+
+### Four concurrent requests
+
+Each cell contains 20 completed requests, or five full waves at the configured
+maximum concurrency of four. `Actual concurrency` is the benchmark's
+time-weighted average, so finite wave startup and drain make it lower than the
+validated server limit in some cells.
+
+| Input/output | Aggregate output tok/s, Off / MTP | Speedup | Mean TPOT, Off / MTP | Median TTFT, Off / MTP | Actual concurrency, Off / MTP | MTP accept length |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2048/512 | 134.87 / 222.57 | 1.65x | 27.24 / 16.10 ms | 1310.1 / 524.5 ms | 4.00 / 3.89 | 3.03 |
+| 2048/1024 | 142.78 / 254.04 | 1.78x | 26.80 / 14.73 ms | 1313.6 / 521.3 ms | 4.00 / 3.92 | 3.05 |
+| 2048/2048 | 146.73 / 269.31 | 1.84x | 26.65 / 13.91 ms | 1318.5 / 527.8 ms | 4.00 / 3.84 | 3.10 |
+| 4096/512 | 92.11 / 174.34 | 1.89x | 27.44 / 17.62 ms | 2684.6 / 1133.3 ms | 3.73 / 3.73 | 3.14 |
+| 4096/1024 | 100.23 / 179.24 | 1.79x | 26.75 / 14.74 ms | 2674.2 / 3193.2 ms | 3.73 / 3.75 | 3.04 |
+
+## How to read throughput
+
+SGLang reports two different views of generation performance:
+
+- `E2E output tok/s = total generated tokens / benchmark request duration`.
+  This includes TTFT, so a long prefill lowers the number.
+- `Steady decode tok/s = 1000 / mean TPOT` for concurrency-one requests. This
+  removes TTFT and shows the sustained decode rate after the first token.
+
+For `20480/1024`, MTP has a 5289.5 ms mean TTFT and 11.40 ms mean TPOT. It
+therefore reaches 60.38 tok/s end to end but 87.74 tok/s during steady decode.
+The earlier `20480/128 = 18.81 tok/s` observation used only 128 output tokens:
+the same roughly 5.3-second prefill was amortized over far less generation. It
+was an end-to-end result, not a 18.81 tok/s decode ceiling.
+
+The MTP setting `4 draft tokens` is also not a maximum output length. It is the
+number of candidates proposed per speculative cycle; cycles repeat until the
+requested 1024, 4096, or 8192 output tokens have been generated.
+
+## Capacity and skipped cells
+
+The single-request profiles expose a 24,576-token context and total-token pool.
+This server build empirically requires `input + output < 24576`; equality was
+rejected with HTTP 400. Consequently, `20480/4096` and `20480/8192` are
+recorded as capacity skips rather than failed benchmarks.
+
+The four-request profiles use a measured 20,480-token total pool. These five
+cells fit:
 
 ```text
-2026-07-31 14:56:44 to 15:25:32 Asia/Shanghai (UTC+08:00)
+(2048 + 512)  * 4 = 10240
+(2048 + 1024) * 4 = 12288
+(2048 + 2048) * 4 = 16384
+(4096 + 512)  * 4 = 18432
+(4096 + 1024) * 4 = 20480
 ```
 
-Each profile was started from a clean GPU state. No other GPU compute process
-was present. After the suite, GPU memory usage returned to zero and
-`vm.overcommit_memory` was restored to `0`.
+`(4096 + 2048) * 4 = 24576` exceeds that measured c4 pool and is skipped. The
+c4 server was queried through `/server_info` before testing and reported both
+`max_total_num_tokens=20480` and `effective_max_running_requests_per_dp=4`.
 
-## Test environment
+## Real datasets
 
-### Hardware and host
+ShareGPT uses natural response lengths. LongBench-v2 uses the official
+10-token short-answer setting and a separate fixed 512-token generation on the
+same prompts.
+
+| Dataset | Requests / max concurrency | Median input / output | E2E output tok/s, Off / MTP | Speedup | Median TTFT, Off / MTP | Mean TPOT, Off / MTP |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ShareGPT | 30 / 1 | 204 / 218.5 | 40.51 / 75.60 | 1.87x | 212.21 / 231.14 ms | 23.57 / 11.92 ms |
+| ShareGPT | 20 / 4 | 239 / 280 | 133.59 / 224.17 | 1.68x | 258.70 / 279.87 ms | 26.80 / 14.76 ms |
+| LongBench-v2 short answer | 20 / 1 | 17844 / 10 | 2.219 / 2.181 | 0.98x | 4401.83 / 4593.94 ms | 24.38 / 13.86 ms |
+| LongBench-v2 fixed 512 | 20 / 1 | 17844 / 512 | 30.31 / 48.19 | 1.59x | 4438.87 / 4611.11 ms | 24.60 / 12.01 ms |
+
+The LongBench-v2 source is the renamed
+[`zai-org/LongBench-v2`](https://huggingface.co/datasets/zai-org/LongBench-v2)
+repository. Seventy `short` rows were considered; 28 fit the constraint
+`prompt + 512 <= 24576`, and 20 were selected with seed 42. Their prompt range
+is 10,954-22,842 tokens, median 17,844. The resulting local JSONL SHA-256 is
+`93ecd8a799ba868cfb2a1c28a38ce87653cb30eb211712030970020d39990058`.
+The ShareGPT source SHA-256 is
+`35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4`.
+
+## Is this an MTP port?
+
+No SGLang inference kernel was ported for this result. Official SGLang v0.5.16
+already includes `qwen3_5_mtp.py`, the Qwen3.5/Qwen3.6 model mapping, and EAGLE
+speculative scheduling. Qwen3.6 exposes the internal architecture name
+`Qwen3_5ForConditionalGeneration`.
+
+The local SGLang branch is based on official tag `v0.5.16`, commit
+`fdebc938f7f4d16fe6b9f55dcd9a767cf0899ea1`. Its two local commits add only
+`profiles/170hx/*`; `git diff v0.5.16..HEAD -- python/sglang` is empty. The
+tested head is `9a5776c3cf04e7e05fa7f7166b1b3a0f1a6226d1`. This repository's work is a
+memory-safe launch profile, controlled measurement, capacity validation, and
+telemetry for the CMP 170HX.
+
+The checkpoint's `mtp.safetensors` contains the learned draft weights, but
+weights alone are not engine support. The serving engine must still implement
+the draft model, speculative scheduler, verification, and SM80-safe kernels.
+
+[`vllm-dsa-mtp-sm80`](https://github.com/allover326/vllm-dsa-mtp-sm80) solves a
+different vLLM problem. It composes an SM80 Triton sparse-MLA/DSA backend with
+pipeline-parallel MTP fixes for GLM-5.2 and DeepSeek-family sparse models. This
+Qwen3.6-27B checkpoint is a dense hybrid GDN model, runs on one GPU, and uses
+SGLang's existing SM80 Triton GDN path. None of that vLLM repository's patches
+were copied here.
+
+SGLang support is selected by architecture and CUDA capability, not the
+marketing name `CMP 170HX`. This card and A100 are both SM80, but this
+repository only claims the exact card, model, and software combination tested
+here.
+
+## Test environment and time
+
+Controlled fixed-length request window:
+
+```text
+2026-07-31 17:56:30 to 19:54:15 Asia/Shanghai (UTC+08:00)
+```
+
+Real-dataset request window:
+
+```text
+2026-07-31 22:08:11 to 22:35:41 Asia/Shanghai (UTC+08:00)
+```
 
 | Component | Measured value |
 | --- | --- |
-| GPU PCI identity | NVIDIA GA100 `[CMP 170HX]`, device `10de:2082` |
-| `nvidia-smi` name | `NVIDIA Graphics Device` (firmware enumeration) |
-| Compute capability | 8.0 / SM80 |
+| GPU | NVIDIA GA100 `[CMP 170HX]`, PCI ID `10de:2082`, SM80 |
 | GPU memory | 40960 MiB |
+| Power limit | 250 W for every raw telemetry sample; allowed range 100-250 W |
 | Maximum SM / memory clock | 1410 / 1215 MHz |
-| Power state | current/requested/default 250 W; allowed range 100-250 W |
-| PCIe link during test | 2.5 GT/s x4; endpoint capability 5 GT/s x16 |
-| Host | KVM virtual machine, Debian 12, Linux 6.1.0-51-amd64 |
-| CPU | 44 vCPU, Intel Xeon E5-2680 v4 |
-| Host memory | 24 GiB RAM, 975 MiB swap |
+| PCIe during test | 2.5 GT/s x4; endpoint capability 5 GT/s x16 |
+| Host | KVM VM, Debian 12, Linux 6.1.0-51-amd64 |
+| CPU / RAM | 44 vCPU Intel Xeon E5-2680 v4 / 24 GiB |
+| Swap | **0 B total, 0 B used** |
+| Driver / toolkit | NVIDIA 610.43.02 / CUDA toolkit 13.3.73 |
+| Python / PyTorch | 3.11.2 / 2.11.0+cu130 |
+| SGLang / Triton / FlashInfer | 0.5.16 / 3.6.0 / 0.6.14 |
+| Model | `Qwen3.6-27B-INT8-W8A8`, compressed-tensors dynamic W8A8 |
+| Target / draft loading | 28.48 GiB target weights / 5.53 GiB draft-worker weights |
 
-The downgraded PCIe link affects checkpoint loading and host-device transfers.
-The steady-state decode measurements keep weights and active state on the GPU,
-but this environment detail should still be considered when comparing systems.
+Radix/prefix cache was disabled for all v2 profiles. This does not mean GPU
+state is zero: KV cache and Qwen's GDN/Mamba state are allocated as required by
+serving. No other GPU compute process was present, and GPU memory returned to
+zero after each profile.
 
-### Software
+### Selected 250 W telemetry
 
-| Component | Version |
-| --- | --- |
-| NVIDIA driver / CUDA UMD | 610.43.02 / 13.3 |
-| CUDA toolkit | 13.3.73 |
-| Python | 3.11.2 |
-| PyTorch | 2.11.0+cu130 |
-| SGLang | 0.5.16 |
-| SGLang engine commit | `fdebc938f7f4d16fe6b9f55dcd9a767cf0899ea1` |
-| Triton | 3.6.0 |
-| FlashInfer | 0.6.14 |
+Power statistics use only samples inside a case window with GPU utilization at
+or above 90%. The public CSV includes both active and total sample counts.
 
-The NVIDIA user-mode driver/toolkit reports CUDA 13.3; this PyTorch wheel was
-built against CUDA 13.0.
+| Case | Active mean / P95 power | Mean GPU util | Mean SM clock | Max temperature |
+| --- | ---: | ---: | ---: | ---: |
+| MTP, 1024/8192, c1 | 239.57 / 255.56 W | 94.6% | 1392 MHz | 84 C |
+| Off, 1024/8192, c1 | 247.42 / 251.95 W | 100.0% | 1409 MHz | 80 C |
+| MTP, 4096/1024, c4 | 235.76 / 254.55 W | 94.6% | 1389 MHz | 78 C |
+| Off, 4096/1024, c4 | 241.66 / 250.67 W | 99.8% | 1398 MHz | 81 C |
+| MTP, LongBench fixed 512 | 241.18 / 258.18 W | 96.2% | 1360 MHz | 81 C |
+| Off, LongBench fixed 512 | 246.84 / 255.90 W | 99.7% | 1376 MHz | 82 C |
 
-### Model
+The configured limit is not an instantaneous clamp on every NVML-reported
+sample; short overshoot samples can exceed 250 W. All 40,172 raw rows report a
+250.00 W control limit. Sampling cadence is 200-201 ms at the median/P95.
 
-| Item | Value |
-| --- | --- |
-| Checkpoint | `Qwen3.6-27B-INT8-W8A8` |
-| Architecture | `Qwen3_5ForConditionalGeneration`, dense hybrid GDN |
-| Text configuration | 64 layers, hidden size 5120, full attention every 4 layers |
-| Quantization | compressed-tensors W8A8: channel-wise INT8 weights, dynamic per-token INT8 activations |
-| Target weight file | 30,394,496,808 bytes; 28.48 GiB loaded GPU weight memory |
-| MTP file | 849,400,424 bytes; 5.53 GiB loaded draft-worker weight memory |
-| `config.json` SHA-256 | `c3f53d4c340b3cac0c42dac9f66610acb26e2519b58a9fa20fcd87e706f3f979` |
-
-The checkpoint itself is not distributed by this repository.
-
-## Serving profiles
-
-| Profile | Context | Running requests | MTP | Key settings |
-| --- | ---: | ---: | --- | --- |
-| `mtp` | 24,576 | 1 | EAGLE, 3 steps, top-k 1, 4 draft tokens | page 64, prefill graph off |
-| `baseline` | 24,576 | 1 | Off | page 1, prefill graph off |
-| `prefill` | 32,768 | 1 | Off | 4096 chunk, prefill CUDA Graph on |
-| `throughput` | 32,768 | 4 | Off | mixed chunk, decode graphs for batch 1/2/4 |
-
-MTP is limited to 24K because the target and draft workers together consume
-approximately 34 GiB before KV cache, Mamba state, and CUDA Graph allocations.
-Advertising a 32K MTP context on this 40 GiB card would exceed the measured
-token capacity.
+Earlier 120 W observations are not mixed into this dataset. Their raw
+telemetry was not retained, so they are not suitable for a controlled power
+comparison. The numbers in every table in this README were rerun at 250 W.
 
 ## Methodology
 
-The serving benchmark uses `python -m sglang.benchmark.serving` with the
-`sglang-oai` backend and SGLang's `random` dataset generator.
+The driver calls `python -m sglang.benchmark.serving` with the `sglang-oai`
+backend. Fixed cases use SGLang's random dataset generator with exact lengths:
 
-Common controls:
+- `--random-range-ratio 1.0`, seed 42, temperature 0.0, top-p 1.0;
+- unlimited offered request rate, bounded by `--max-concurrency`;
+- three requests per single-request and prefill cell;
+- 20 requests per concurrency-four cell;
+- zero benchmark warmup requests on an initialized server;
+- `--flush-cache` for every case, in addition to server-side radix-cache
+  disablement;
+- full per-request JSONL output, including per-token latency arrays.
 
-- exact fixed input and output lengths (`--random-range-ratio 1.0`);
-- seed 42, temperature 0.0, top-p 1.0;
-- unlimited offered request rate, constrained by `--max-concurrency`;
-- cache flush before every measured run;
-- zero benchmark warmup requests on an already initialized SGLang server;
-- five requests for short decode and every prefill length;
-- three requests for 10K/20K long-context cases;
-- twenty requests, five waves, for concurrency four;
-- full JSONL details written locally for each run.
+Zero benchmark warmups avoid a measured race in this SGLang release where the
+client's streamed warmup can finish just before the server releases the
+request, causing the immediate `/flush_cache` call to return HTTP 400. Server
+startup warmup is still enabled.
 
-Why zero benchmark warmups: in this SGLang release, the streamed warmup can
-finish on the client immediately before the server releases the request. The
-benchmark's immediate `/flush_cache` may then return HTTP 400 and retain the
-warmup prefix. The published long-context runs confirmed a successful cache
-flush and tightly grouped TTFT values with no prefix-cache hit.
+`scripts/monitor-gpu.sh` runs `nvidia-smi -lms 200` and records timestamp with
+milliseconds, power draw and limit, GPU utilization, SM and memory clocks,
+temperature, and P-state. The manifest stores exact case start and end epoch
+milliseconds and the unique telemetry segment used by each profile start.
 
-The GPU monitor samples these fields every 200 ms:
+## Serving profiles
 
-```text
-timestamp,power.draw,power.limit,utilization.gpu,clocks.sm,clocks.mem,temperature.gpu,pstate
-```
+| Profile | Context | Total token pool | Max running | Static memory | MTP |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `mtp` | 24576 | 24576 | 1 | 0.94 | EAGLE, 3 steps, top-k 1, 4 draft |
+| `baseline` | 24576 | 24576 | 1 | 0.88 | Off |
+| `mtp-c4` | 24576 | 20480 | 4 | 0.98 | EAGLE, 3 steps, top-k 1, 4 draft |
+| `baseline-c4` | 24576 | 20480 | 4 | 0.88 | Off |
 
-Power summaries include samples with GPU utilization at or above 90%, excluding
-server idle time and model loading. Percentiles use the nearest lower-rank
-sample in sorted order.
+All four profiles use page size 64, 2048-token chunked prefill, a 4096-token
+prefill ceiling, disabled prefill CUDA Graph, and disabled radix cache. The c4
+profiles capture decode graphs for batch sizes 1, 2, 3, and 4.
+
+The high MTP c4 static-memory fraction is intentional. At 0.94, SGLang reduced
+effective concurrency to one. At 0.98 with a 24,576-token pool, draft KV
+allocation failed. A 0.98 fraction with a measured 20,480-token pool starts
+cleanly, reports effective concurrency four, and completed every published c4
+case.
 
 ## Reproduce
 
-Install an SGLang 0.5.16 environment with its CUDA dependencies, obtain the
-checkpoint, and set the paths. `SGLANG_SOURCE` is optional; it selects a source
-checkout instead of the Python package installed in the virtual environment.
+Prepare an SGLang 0.5.16 environment and the checkpoint:
 
 ```bash
 export SGLANG_RUNTIME_HOME=/mnt/ss32t/SGLang
@@ -161,118 +274,85 @@ export SGLANG_SOURCE=/path/to/sglang-v0.5.16
 export MODEL_PATH=/path/to/Qwen3.6-27B-INT8-W8A8
 ```
 
-Confirm the power state before running. The suite verifies 250 W but does not
-change the card's power limit or firmware:
+The suite verifies a 250 W limit, zero swap, no competing GPU process, and the
+server-reported token/request capacity. It does not unlock or change firmware:
 
 ```bash
 nvidia-smi -q -d POWER
+sudo -E env RUN_ID=expanded-250w-v2-20260731 RUN_REAL_DATASETS=0 \
+  scripts/run-250w-suite.sh
 ```
 
-Run the complete matrix:
+Prepare the exact LongBench subset from two datasets-server responses:
 
 ```bash
-sudo -E scripts/run-250w-suite.sh
+curl -o /tmp/longbench-0.json \
+  'https://datasets-server.huggingface.co/filter?dataset=zai-org%2FLongBench-v2&config=default&split=train&where=%22length%22%3D%27short%27&offset=0&length=50'
+curl -o /tmp/longbench-50.json \
+  'https://datasets-server.huggingface.co/filter?dataset=zai-org%2FLongBench-v2&config=default&split=train&where=%22length%22%3D%27short%27&offset=50&length=20'
+
+$SGLANG_VENV/bin/python scripts/prepare-longbench-v2.py \
+  /tmp/longbench-0.json /tmp/longbench-50.json \
+  --model "$MODEL_PATH" --output /tmp/longbench-fit20.jsonl \
+  --num-samples 20 --max-context 24576 --output-tokens 512 --seed 42
 ```
 
-Or launch and measure one profile manually:
+Append real-dataset measurements to the same run ID. Existing completed fixed
+cases are reused:
 
 ```bash
-sudo -E env PROFILE=mtp scripts/serve-qwen36-27b.sh
-
-RUN_TAG=mtp-128-256 WARMUP_REQUESTS=0 \
-DECODE_INPUT_LEN=128 DECODE_OUTPUT_LEN=256 DECODE_PROMPTS=5 \
-scripts/bench-serving.sh decode
+sudo -E env RUN_ID=expanded-250w-v2-20260731 RUN_REAL_DATASETS=1 \
+  SHAREGPT_PATH=/path/to/ShareGPT_V3_unfiltered_cleaned_split.json \
+  LONGBENCH_PATH=/tmp/longbench-fit20.jsonl \
+  scripts/run-250w-suite.sh
 ```
 
-The serving script temporarily sets `vm.overcommit_memory=1` while loading the
-model and restores the original value after startup or shutdown. It must be run
-as root for the restoration guarantee.
+Regenerate the public CSVs:
 
-## Results
+```bash
+scripts/summarize-expanded.py \
+  results/case-manifest-expanded-250w-v2-20260731.csv \
+  --repo-root . \
+  --serving-output results/serving-expanded-250w.csv \
+  --power-output results/power-expanded-250w.csv
+```
 
-### Single-request decode
-
-| Input/output | MTP | Output tok/s | Mean TPOT | Mean TTFT | Accept length | Speedup |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 128/128 | Off | 38.99 | 23.79 ms | 249.70 ms | - | - |
-| 128/128 | 3 steps / 4 draft | 76.59 | 11.04 ms | 262.26 ms | 3.26 | 1.96x |
-| 128/256 | Off | 40.42 | 23.93 ms | 223.86 ms | - | - |
-| 128/256 | 3 steps / 4 draft | 81.17 | 11.30 ms | 266.53 ms | 3.23 | 2.01x |
-| 128/512 | Off | 41.07 | 23.94 ms | 225.91 ms | - | - |
-| 128/512 | 3 steps / 4 draft | 83.45 | 11.48 ms | 262.16 ms | 3.18 | 2.03x |
-
-### Long context
-
-| Input/output | MTP | Input tok/s | Output tok/s | Mean TTFT | Mean TPOT | Accept length |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 10240/128 | Off | 1856.52 | 23.21 | 2404.65 ms | 24.37 ms | - |
-| 10240/128 | 3 steps / 4 draft | 2599.55 | 32.49 | 2466.28 ms | 11.52 ms | 3.23 |
-| 20480/128 | Off | 2476.88 | 15.48 | 5103.24 ms | 24.83 ms | - |
-| 20480/128 | 3 steps / 4 draft | 3009.29 | 18.81 | 5274.62 ms | 11.97 ms | 3.16 |
-
-### Prefill
-
-Each request generates exactly one output token.
-
-| Input tokens | Input tok/s | Mean TTFT |
-| ---: | ---: | ---: |
-| 128 | 890.24 | 136.40 ms |
-| 256 | 1922.66 | 127.62 ms |
-| 512 | 3254.82 | 150.71 ms |
-| 1024 | 4020.76 | 248.31 ms |
-| 2048 | 4418.20 | 457.41 ms |
-| 4096 | 4639.95 | 876.43 ms |
-| 8192 | 4573.80 | 1784.12 ms |
-
-### Concurrency four
-
-Twenty fixed 1024/256 requests completed in 38.51 seconds:
-
-| Output tok/s | Input tok/s | Total tok/s | Mean TTFT | Mean TPOT | Mean concurrency |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 132.95 | 531.80 | 664.75 | 764.86 ms | 27.12 ms | 3.99 |
-
-### 250 W telemetry
-
-| Profile workload | Mean power | Median power | P95 power | Mean SM clock | Max temperature |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| MTP decode suite | 221.86 W | 216.06 W | 258.15 W | 1376 MHz | 66 C |
-| Non-MTP decode suite | 229.52 W | 232.62 W | 253.24 W | 1394 MHz | 75 C |
-| Prefill curve | 238.91 W | 249.40 W | 264.60 W | 1313 MHz | 60 C |
-| Concurrency-four mixed | 220.43 W | 217.78 W | 253.93 W | 1402 MHz | 65 C |
-
-The 250 W setting is a control limit, not a guarantee that every instantaneous
-NVML sample is at or below 250 W. Short reported samples exceeded the limit;
-mean and percentile values better describe sustained behavior. Prefill spends
-more time power-limited, which explains its lower mean SM clock.
-
-For context only, earlier fixed-length measurements under the previous 120 W
-limit were 30.33 tok/s for baseline 128/256, 66.15 tok/s for MTP 128/256, and
-99.79 tok/s for concurrency-four 1024/256. Raw 120 W telemetry was not retained,
-so those values are not part of the controlled 250 W dataset.
+The launch script temporarily sets `vm.overcommit_memory=1` while loading and
+restores the original value after startup or shutdown. Root is required for
+that restoration guarantee.
 
 ## Repository contents
 
 ```text
-scripts/                  launch, suite runner, benchmark, telemetry, summaries
-environment/              measured host/software/model metadata
-results/serving-250w.csv  machine-readable serving metrics
-results/power-250w.csv    machine-readable active-load power summary
-results/telemetry/        raw 200 ms NVML samples
+scripts/                         launch, benchmark, monitor, data preparation
+environment/expanded-250w-v2-*  measured host/software/model metadata
+results/case-manifest-*-v2-*     case windows, status, files, dataset hashes
+results/serving-expanded-250w.csv
+results/power-expanded-250w.csv
+results/telemetry/*-v2-*         raw 200 ms NVML telemetry
 ```
+
+Raw SGLang JSONL and server logs remain gitignored because they contain large
+per-token arrays, generated text, absolute local paths, and complete server
+configuration dumps. The compact public CSVs are derived from those raw files.
 
 ## Limitations
 
-- This is one card and one software/model combination, not a general GPU rank.
-- Request counts are sufficient for profile selection but not confidence
-  intervals across cards, drivers, temperatures, or repeated process starts.
-- Random fixed-token prompts do not model every production prompt distribution.
-- Maximum temperature differs with suite duration and starting temperature.
-- MTP is optimized for concurrency one here. The four-way profile is non-MTP.
+- This is one card, checkpoint, software build, and power state, not a general
+  GPU ranking.
+- Three repeats per fixed single-request cell are appropriate for profile
+  selection, not cross-system confidence intervals.
+- Fixed-token random prompts isolate serving behavior but do not represent
+  every production prompt distribution; ShareGPT and LongBench are included
+  as complementary workloads.
+- The two sub-second 512-token prefill cases had no telemetry sample at or
+  above 90% utilization, so their active-power fields are intentionally empty.
+- A100 shares SM80 with CMP 170HX, but A100 memory size, clocks, PCIe, cooling,
+  and firmware differ and were not measured here.
 - Firmware modification and power-limit unlocking are outside this repository.
 
 ## License and acknowledgements
 
-Code is provided under the Apache License 2.0. SGLang is developed by the
-[SGLang project](https://github.com/sgl-project/sglang). The checkpoint and its
-license are distributed separately by its model provider.
+Code is Apache-2.0. SGLang is developed by the
+[SGLang project](https://github.com/sgl-project/sglang). Qwen3.6, ShareGPT, and
+LongBench-v2 are distributed under their respective licenses.

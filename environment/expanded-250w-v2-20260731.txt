@@ -1,0 +1,24 @@
+collected_at=2026-07-31T17:54:47+08:00
+kernel=Linux 6.1.0-51-amd64 x86_64 GNU/Linux
+os=Debian GNU/Linux 12 (bookworm)
+cpu=Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz
+logical_cpus=44
+memory=24Gi
+swap_total=0
+swap_used=0
+vm_overcommit_memory=0
+NVIDIA Graphics Device, 610.43.02, 40960, 8.0, 00000000:01:00.0, 250.00, 1410, 1215, 92.00.66.00.02
+01:00.0 3D controller [0302]: NVIDIA Corporation GA100 [CMP 170HX] [10de:2082] (rev a1)
+python=3.11.2
+torch=2.11.0+cu130
+torch_cuda=13.0
+sglang=0.5.16
+triton=3.6.0
+flashinfer=0.6.14
+c3f53d4c340b3cac0c42dac9f66610acb26e2519b58a9fa20fcd87e706f3f979  /mnt/ss32t/LLM-models/Qwen3.6-27B-INT8-W8A8/config.json
+896eeba60a1195e034dc6b9a7bbddd64b6174992348f5dc7d75daaa93d0bdd45  /mnt/ss32t/LLM-models/Qwen3.6-27B-INT8-W8A8/generation_config.json
+sglang_source=/mnt/ss32t/SGLang-170HX-MTP
+sglang_source_commit=9a5776c3cf04e7e05fa7f7166b1b3a0f1a6226d1
+sglang_source_dirty=false
+sglang_upstream_v0.5.16_commit=fdebc938f7f4d16fe6b9f55dcd9a767cf0899ea1
+sglang_python_core_diff_from_upstream=none
