@@ -20,9 +20,12 @@ scripts/summarize-expanded.py \
   --power-output results/power-expanded-250w.csv
 ```
 
-`steady_decode_tok_s` is `1000 / mean_tpot_ms`. For concurrency one it is the
-steady decode rate after TTFT; for concurrent runs it is a per-request TPOT
-inverse, while `e2e_output_tok_s` is the aggregate server throughput.
+`input_tok_s` is total completed prompt tokens divided by the benchmark
+wall-clock request window. `e2e_output_tok_s` is total completed generated
+tokens divided by that wall-clock window. `steady_decode_tok_s` is
+`1000 / mean_tpot_ms`; it is a steady decode-rate estimate for
+maximum-concurrency-one results and a per-request TPOT inverse for concurrent
+runs, not aggregate server throughput.
 
 Power fields prefixed with `active_` use only samples within the manifest case
 window whose GPU utilization is at least 90%. `samples_in_window` and

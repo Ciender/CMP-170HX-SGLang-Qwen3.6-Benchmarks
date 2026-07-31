@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 FIELDS = (
-    ("output_throughput", "out tok/s", ".2f"),
-    ("input_throughput", "in tok/s", ".2f"),
+    ("output_throughput", "wall-clock output tok/s", ".2f"),
+    ("input_throughput", "wall-clock prompt tok/s", ".2f"),
     ("mean_ttft_ms", "TTFT ms", ".2f"),
     ("mean_tpot_ms", "TPOT ms", ".2f"),
     ("accept_length", "accept", ".2f"),
