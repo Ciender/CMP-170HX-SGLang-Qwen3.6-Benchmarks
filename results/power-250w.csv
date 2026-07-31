@@ -1,0 +1,5 @@
+profile,samples_at_util_ge_90,mean_power_w,median_power_w,p95_power_w,mean_gpu_util_pct,mean_sm_clock_mhz,max_temperature_c
+mtp-decode-suite,562,221.86,216.06,258.15,95.7,1376,66
+baseline-decode-suite,725,229.52,232.62,253.24,99.7,1394,75
+prefill-curve,83,238.91,249.40,264.60,98.5,1313,60
+throughput-c4-mixed,185,220.43,217.78,253.93,99.6,1402,65

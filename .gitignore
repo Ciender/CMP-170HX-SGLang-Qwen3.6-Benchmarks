@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+results/logs/
+results/raw/
+environment/latest-run.txt
