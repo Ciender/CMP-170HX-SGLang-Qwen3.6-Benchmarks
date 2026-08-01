@@ -316,4 +316,4 @@ dataset SHA
    和 `python3 -m py_compile scripts/*.py`。
 
 10G 改 40G 与外部 8G 改 64G 的结构化对照见
-[`CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md`](CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md)。
+[`README.zh-CN.md`](README.zh-CN.md)。

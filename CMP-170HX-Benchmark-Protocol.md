@@ -344,5 +344,5 @@ Never:
    `shellcheck scripts/*.sh`, and `python3 -m py_compile scripts/*.py`.
 
 See
-[`CMP-170HX-10G-to-40G-vs-8G-to-64G.md`](CMP-170HX-10G-to-40G-vs-8G-to-64G.md)
+[`README.md`](README.md)
 for the structured 10G-to-40G versus 8G-to-64G comparison.

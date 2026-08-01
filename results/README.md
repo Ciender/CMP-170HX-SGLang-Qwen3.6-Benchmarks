@@ -1,4 +1,4 @@
-# CMP 170HX 10G-to-40G Result Data
+# CMP 170HX 10G Result Data
 
 The canonical public dataset is `expanded-250w-v2-20260731`:
 
