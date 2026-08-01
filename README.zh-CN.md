@@ -183,8 +183,101 @@ ShareGPT 源文件 SHA-256 是
 | FlashInfer | 0.6.14 |
 | Checkpoint | [`Avesed/Qwen3.6-27B-INT8-W8A8`](https://huggingface.co/Avesed/Qwen3.6-27B-INT8-W8A8)，compressed-tensors 动态 W8A8 |
 | 基础模型 | [`Qwen/Qwen3.6-27B`](https://huggingface.co/Qwen/Qwen3.6-27B) |
-| Target 权重加载 | 28.48 GiB |
-| Draft worker 权重加载 | 5.53 GiB |
+| 本地 target 权重文件 | `model.safetensors`，30,394,496,808 bytes（28.31 GiB） |
+| 本地 MTP 权重文件 | `mtp.safetensors`，849,400,424 bytes（0.79 GiB） |
+| Target 运行时加载阶段增量 | 28.48 GiB |
+| MTP draft worker 加载阶段增量 | 5.53 GiB；不是 `mtp.safetensors` 的文件大小，也不能解释为最终独占常驻权重 |
+
+### 显存账单与 token 池
+
+以下数字直接来自四个服务启动日志，单位为 GiB，SGLang 日志保留两位小数。
+“加载阶段增量”是该阶段开始和结束时可用显存之差；MTP draft 在初始化后与 target
+共享大词表 embedding 和 LM head（checkpoint 配置
+`mtp_use_dedicated_embeddings=false`），因此 5.53 GiB 不能与 0.79 GiB 的
+`mtp.safetensors` 文件大小等同，也不是严格分离后的最终 draft 独占显存。
+
+| 显存项目 | 最大并发 1，MTP 关闭 | 最大并发 1，MTP 开启 | 最大并发 4，MTP 关闭 | 最大并发 4，MTP 开启 |
+| --- | ---: | ---: | ---: | ---: |
+| 总 token 池 | 24,576 tokens | 24,576 tokens | 20,480 tokens | 20,480 tokens |
+| Target 加载阶段增量 | 28.48 | 28.48 | 28.48 | 28.48 |
+| MTP draft worker 加载阶段增量 | 不适用 | 5.53 | 不适用 | 5.53 |
+| Target GDN conv state | 0.01 | 0.01 | 0.01 | 0.01 |
+| Target GDN SSM state | 0.28 | 0.28 | 0.70 | 0.70 |
+| MTP 验证用 intermediate SSM state | 不适用 | 1.12 | 不适用 | 2.81 |
+| MTP 验证用 intermediate conv state | 不适用 | 0.01 | 不适用 | 0.03 |
+| Target full-attention KV（K + V） | 0.75 + 0.75 = 1.50 | 0.75 + 0.75 = 1.50 | 0.63 + 0.63 = 1.26 | 0.63 + 0.63 = 1.26 |
+| MTP draft KV（K + V） | 不适用 | 0.05 + 0.05 = 0.10 | 不适用 | 0.04 + 0.04 = 0.08 |
+| Decode/verify/draft CUDA Graph 合计 | 0.06 | 0.13 | 0.12 | 0.36 |
+| 两级 KV pool 分配完成后的剩余显存 | 8.97 | 2.21 | 8.80 | 0.35 |
+
+最后一行是在 CUDA Graph 捕获之前记录的 pool-end 值。捕获前 SGLang 会释放临时
+内存池，所以后续日志中的 `available_gpu_mem` 会跳高，不能和该行相加来推算总显存。
+表中也没有把 40 GiB 强行凑成一个加总，因为 CUDA context、allocator 保留区、
+临时 workspace 和共享对象无法从这些汇总日志中完全拆开。
+
+模型原生 `max_position_embeddings` 是 262,144；24,576 不是模型原生上下文上限，
+也不是显卡的绝对极限，而是本项目选择并跑通的单请求安全 profile。使用 64-token
+page 时，24,576 正好是 384 pages。Qwen3.6-27B 的 64 层中只有 16 层是 full
+attention，其余 48 层是 GDN/linear attention，所以它不会为所有 64 层保存随
+上下文线性增长的 KV。Target 的 BF16 KV 账单为：
+
+```text
+16 layers * 4 KV heads * 256 head_dim * 2 bytes * 2 (K + V)
+= 65,536 bytes/token = 64 KiB/token
+
+24,576 tokens * 64 KiB = 1.50 GiB
+20,480 tokens * 64 KiB = 1.25 GiB
+```
+
+启动日志将 20,480-token KV 的 K、V 分别四舍五入为 0.63 GiB，因此表中相加显示
+1.26 GiB，未舍入结果是 1.25 GiB。MTP draft 只有 1 个 full-attention layer：
+
+```text
+1 layer * 4 KV heads * 256 head_dim * 2 bytes * 2 (K + V)
+= 4 KiB/token
+
+24,576 tokens = 96 MiB (0.094 GiB)
+20,480 tokens = 80 MiB (0.078 GiB)
+```
+
+48 个 GDN 层使用按运行请求数预分配的 recurrent state，而不是完整的逐 token
+KV。最大并发 4 且 MTP 开启时，draft worker、GDN intermediate state、target/draft
+KV 和 CUDA Graph 共同挤占显存；24,576-token pool 启动失败，因此本文使用已验证的
+20,480-token pool，分配两级 KV 后只剩 0.35 GiB。
+
+### W8A8、W8A16 与 Fable Fusion 711
+
+当前 checkpoint 确实是 INT8 激活的 W8A8，但“W8A8”不表示模型中的每个算子都以
+INT8 运行。它的 `recipe.yaml` 对命中的 Linear 层使用对称 per-channel INT8
+权重（MSE observer）和动态 per-token INT8 输入激活。质量敏感的 GDN
+`in_proj_a`/`in_proj_b`、`lm_head`、embedding、vision tower 和 MTP head 被排除，
+继续使用 BF16。量化覆盖 MLP、full-attention 投影以及未被排除的 GDN Linear
+投影。
+
+GA100/SM80 的 dense INT8 Tensor Core 理论运算率约为 BF16 的两倍，但本模型的
+真实吞吐不可能简单翻倍：部分层仍是 BF16，GDN kernel、动态量化/反量化、显存带宽、
+batch size 和 MTP verification 都会成为限制。W8A8 的代价是激活量化误差，可能
+改变很接近的 logits，在长推理链、代码或低概率 token 上累积差异。per-channel
+权重、动态 per-token 激活和敏感层 BF16 都是在降低这个风险。Avesed 模型卡称其
+“near-lossless”，但没有提供可在本文环境核验的 BF16 对照表，因此本文不把它当作
+独立精度结论。
+
+W8A16 保持 INT8 权重，但让激活保留 FP16/BF16。它通常更接近 BF16、对异常激活
+更稳健，也省掉动态激活 INT8 量化误差；代价是不能利用 W8A8 的 activation-INT8
+GEMM 路径。Prefill 和较大 batch 更可能是 W8A8 占优。单 token、小 batch decode
+经常受权重带宽和 kernel 效率限制，W8A16 仍能从较小的 INT8 权重受益，特定内核上
+可能接近甚至超过 W8A8，但不能仅凭格式断言谁更快。本文没有在这张 CMP 170HX 上
+实测 W8A16，因此速度和精度都不能与上表直接横比。
+
+用户给出的
+[`lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP`](https://huggingface.co/lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP)
+就是 W8A16 打包：INT8 权重、FP16/BF16 激活，并保留 BF16 MTP。它不是官方原版
+Qwen3.6-27B 的另一种量化，而是量化自
+[`DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP`](https://huggingface.co/DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP)
+这一多阶段微调与融合模型。“Fable Fusion”是该上游微调/merge 系谱的名称；“711”
+来自作者模型卡中 MXFP8 版本的 ARC-Challenge 0.711 成绩。它不是 INT8 kernel、
+MTP 算法或 170HX 优化版本号。该仓库面向 vLLM/Marlin 并报告双 RTX 3090 数据，
+不能拿它的速度数字代替本文 SGLang 单卡结果。
 
 ### 250 W 遥测摘录
 

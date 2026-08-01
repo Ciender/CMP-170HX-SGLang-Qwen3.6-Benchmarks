@@ -198,8 +198,118 @@ Real-dataset request window:
 | FlashInfer | 0.6.14 |
 | Checkpoint | [`Avesed/Qwen3.6-27B-INT8-W8A8`](https://huggingface.co/Avesed/Qwen3.6-27B-INT8-W8A8), compressed-tensors dynamic W8A8 |
 | Base model | [`Qwen/Qwen3.6-27B`](https://huggingface.co/Qwen/Qwen3.6-27B) |
-| Target weight loading | 28.48 GiB |
-| Draft-worker weight loading | 5.53 GiB |
+| Local target weight file | `model.safetensors`, 30,394,496,808 bytes (28.31 GiB) |
+| Local MTP weight file | `mtp.safetensors`, 849,400,424 bytes (0.79 GiB) |
+| Target runtime load-phase delta | 28.48 GiB |
+| MTP draft-worker load-phase delta | 5.53 GiB; this is neither the size of `mtp.safetensors` nor a measurement of final exclusive resident weights |
+
+### GPU memory accounting and token pool
+
+The following values come directly from the four server startup logs. Units are
+GiB and SGLang reports two decimal places. A load-phase delta is the difference
+in available memory at the beginning and end of that phase. After initialization,
+the MTP draft shares the large-vocabulary embedding and LM head with the target
+(`mtp_use_dedicated_embeddings=false`). The 5.53 GiB delta therefore must not be
+equated with the 0.79 GiB `mtp.safetensors` file or interpreted as strictly
+isolated final draft residency.
+
+| Memory item | Maximum concurrency 1, MTP disabled | Maximum concurrency 1, MTP enabled | Maximum concurrency 4, MTP disabled | Maximum concurrency 4, MTP enabled |
+| --- | ---: | ---: | ---: | ---: |
+| Total token pool | 24,576 tokens | 24,576 tokens | 20,480 tokens | 20,480 tokens |
+| Target load-phase delta | 28.48 | 28.48 | 28.48 | 28.48 |
+| MTP draft-worker load-phase delta | Not applicable | 5.53 | Not applicable | 5.53 |
+| Target GDN convolution state | 0.01 | 0.01 | 0.01 | 0.01 |
+| Target GDN SSM state | 0.28 | 0.28 | 0.70 | 0.70 |
+| MTP-verification intermediate SSM state | Not applicable | 1.12 | Not applicable | 2.81 |
+| MTP-verification intermediate convolution state | Not applicable | 0.01 | Not applicable | 0.03 |
+| Target full-attention KV (K + V) | 0.75 + 0.75 = 1.50 | 0.75 + 0.75 = 1.50 | 0.63 + 0.63 = 1.26 | 0.63 + 0.63 = 1.26 |
+| MTP draft KV (K + V) | Not applicable | 0.05 + 0.05 = 0.10 | Not applicable | 0.04 + 0.04 = 0.08 |
+| Decode/verify/draft CUDA Graph total | 0.06 | 0.13 | 0.12 | 0.36 |
+| Free memory after both KV pools were allocated | 8.97 | 2.21 | 8.80 | 0.35 |
+
+The final row is the pool-end value recorded before CUDA Graph capture. SGLang
+releases temporary pools before capture, so the later `available_gpu_mem` value
+jumps upward and cannot be added to that row. The table also deliberately does
+not force every entry to sum to 40 GiB: CUDA context, allocator reserves,
+temporary workspaces, and shared objects cannot be fully separated from these
+summary log lines.
+
+The model's native `max_position_embeddings` is 262,144. The 24,576 value is
+neither the native model limit nor an absolute limit of the card; it is the
+measured, safe single-request profile selected for this project. With 64-token
+pages, 24,576 is exactly 384 pages. Only 16 of Qwen3.6-27B's 64 layers use full
+attention; the other 48 are GDN/linear-attention layers and do not all retain a
+token-linear KV cache. The target BF16 KV calculation is:
+
+```text
+16 layers * 4 KV heads * 256 head_dim * 2 bytes * 2 (K + V)
+= 65,536 bytes/token = 64 KiB/token
+
+24,576 tokens * 64 KiB = 1.50 GiB
+20,480 tokens * 64 KiB = 1.25 GiB
+```
+
+For 20,480 tokens, the startup log rounds K and V separately to 0.63 GiB, so
+the displayed components sum to 1.26 GiB while the unrounded result is 1.25
+GiB. The MTP draft has only one full-attention layer:
+
+```text
+1 layer * 4 KV heads * 256 head_dim * 2 bytes * 2 (K + V)
+= 4 KiB/token
+
+24,576 tokens = 96 MiB (0.094 GiB)
+20,480 tokens = 80 MiB (0.078 GiB)
+```
+
+The 48 GDN layers instead use recurrent state allocated by running-request
+capacity. With maximum concurrency four and MTP enabled, the draft worker, GDN
+intermediate state, target/draft KV, and CUDA Graphs jointly create the tight
+memory case. A 24,576-token pool failed to start, so the published profile uses
+the verified 20,480-token pool and has only 0.35 GiB free after both KV pools
+are allocated.
+
+### W8A8, W8A16, and Fable Fusion 711
+
+The tested checkpoint is genuinely W8A8 with INT8 activations, but W8A8 does
+not mean that every operation in the model runs in INT8. Its `recipe.yaml`
+applies symmetric per-channel INT8 weights (MSE observer) and dynamic per-token
+INT8 input activations to matching Linear layers. Quality-sensitive GDN
+`in_proj_a`/`in_proj_b`, `lm_head`, embeddings, the vision tower, and the MTP
+head are excluded and remain BF16. Quantization covers the MLP, full-attention
+projections, and non-excluded GDN Linear projections.
+
+GA100/SM80 has roughly twice the dense theoretical Tensor Core operation rate
+for INT8 as for BF16, but real Qwen3.6 throughput cannot simply double. BF16
+layers, GDN kernels, dynamic quantization/dequantization, memory bandwidth,
+batch size, and MTP verification all affect the result. W8A8 introduces
+activation-quantization error that can change close logits and accumulate in
+long reasoning, code, or low-probability tokens. Per-channel weights, dynamic
+per-token activations, and BF16-sensitive layers reduce this risk. The Avesed
+model card calls the checkpoint “near-lossless” but provides no BF16 comparison
+table reproducible in this environment, so this report does not treat that
+claim as an independently measured accuracy result.
+
+W8A16 keeps INT8 weights but retains FP16/BF16 activations. It is normally
+closer to BF16 and more robust to activation outliers, while avoiding dynamic
+INT8 activation error. In exchange, it gives up the activation-INT8 GEMM path
+that can benefit W8A8. W8A8 is more likely to lead in prefill and larger
+batches. Single-token, small-batch decode is often limited by weight bandwidth
+and kernel efficiency; W8A16 can still benefit from smaller INT8 weights and
+may match or beat W8A8 with a favorable kernel. The format alone does not
+determine which is faster. W8A16 was not measured on this CMP 170HX, so neither
+speed nor accuracy can be compared directly with the tables above.
+
+The user-referenced
+[`lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP`](https://huggingface.co/lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP)
+is such a W8A16 package: INT8 weights, FP16/BF16 activations, and a BF16 MTP
+head. It is not another quantization of the official stock Qwen3.6-27B. Its
+source is the multi-stage fine-tuned and merged
+[`DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP`](https://huggingface.co/DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP).
+“Fable Fusion” names that upstream fine-tune/merge lineage; “711” comes from
+the upstream card's 0.711 ARC-Challenge score for its MXFP8 build. It is not an
+INT8 kernel, an MTP method, or a 170HX optimization version. That repository
+targets vLLM/Marlin and reports dual-RTX-3090 measurements, which cannot replace
+the single-card SGLang measurements in this report.
 
 ### Selected 250 W telemetry
 
