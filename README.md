@@ -1,15 +1,15 @@
-# CMP 170HX + SGLang + Qwen3.6-27B W8A8 Benchmark
+# CMP 170HX 10G-to-40G + SGLang + Qwen3.6-27B W8A8 Benchmark
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 Single-GPU `baseline` (MTP disabled) versus `mtp` (MTP enabled) serving results for
-`Qwen3.6-27B-INT8-W8A8` on a 40 GiB NVIDIA CMP 170HX (GA100, SM80), using
+`Qwen3.6-27B-INT8-W8A8` on a CMP 170HX 10G-to-40G (40 GiB, GA100, SM80), using
 SGLang 0.5.16 at a configured 250 W power limit. The canonical run is
 `expanded-250w-v2-20260731`; all tables below come from that run.
 
 Related documents:
-[`64 GiB external reproduction comparison`](COMPARISON-64GB.md) |
-[`complete benchmark pipeline and publication protocol`](BENCHMARK-PROTOCOL.md)
+[`10G-to-40G vs 8G-to-64G comparison`](CMP-170HX-10G-to-40G-vs-8G-to-64G.md) |
+[`complete benchmark pipeline and publication protocol`](CMP-170HX-Benchmark-Protocol.md)
 
 ## Benchmark results
 
@@ -183,7 +183,7 @@ Real-dataset request window:
 
 | Component | Measured value |
 | --- | --- |
-| GPU | NVIDIA GA100 `[CMP 170HX]`, PCI ID `10de:2082`, SM80 |
+| GPU | NVIDIA GA100 `[CMP 170HX]` 10G-to-40G, PCI ID `10de:2082`, SM80 |
 | GPU memory | 40960 MiB |
 | Configured power limit for the canonical run | 250 W |
 | Maximum SM clock | 1410 MHz |

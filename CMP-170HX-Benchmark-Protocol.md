@@ -1,6 +1,6 @@
-# Complete Benchmark Pipeline and Publication Protocol
+# CMP 170HX 10G-to-40G / 8G-to-64G Benchmark Protocol
 
-[English](BENCHMARK-PROTOCOL.md) | [简体中文](BENCHMARK-PROTOCOL.zh-CN.md)
+[English](CMP-170HX-Benchmark-Protocol.md) | [简体中文](CMP-170HX-Benchmark-Protocol.zh-CN.md)
 
 This document is the operating contract for reproducers, reviewers, and AI
 agents. It defines a complete CMP 170HX + SGLang + Qwen3.6 benchmark run, the
@@ -40,7 +40,7 @@ one variable.
 
 ### Level B: controlled A/B
 
-Measure the causal effect of one variable, such as 40 GiB versus 64 GiB, patch
+Measure the causal effect of one variable, such as 10G-to-40G versus 8G-to-64G, patch
 disabled versus enabled, or 120 W versus 250 W. Except for the target variable,
 the following must be identical:
 
@@ -54,7 +54,7 @@ the following must be identical:
 - the same power limit, swap state, background GPU processes, and cache policy;
 - at least three independent RUN_IDs with counterbalanced profile order.
 
-The current 40 GiB run and external 64 GiB report are Level A, not Level B.
+The current 10G-to-40G run and external 8G-to-64G report are Level A, not Level B.
 
 ## Fixed test contract
 
@@ -343,5 +343,6 @@ Never:
 7. Before committing, check Markdown table widths, run `git diff --check`,
    `shellcheck scripts/*.sh`, and `python3 -m py_compile scripts/*.py`.
 
-See [`COMPARISON-64GB.md`](COMPARISON-64GB.md) for the structured external
-64 GiB report and comparability analysis.
+See
+[`CMP-170HX-10G-to-40G-vs-8G-to-64G.md`](CMP-170HX-10G-to-40G-vs-8G-to-64G.md)
+for the structured 10G-to-40G versus 8G-to-64G comparison.

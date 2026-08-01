@@ -1,15 +1,15 @@
-# CMP 170HX + SGLang + Qwen3.6-27B W8A8 推理测试
+# CMP 170HX 10G 改 40G + SGLang + Qwen3.6-27B W8A8 推理测试
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-这是 `Qwen3.6-27B-INT8-W8A8` 在单张 40 GiB NVIDIA CMP 170HX
-（GA100、SM80）上运行 SGLang 0.5.16 的 `baseline`（MTP 关闭）与 `mtp`
+这是 `Qwen3.6-27B-INT8-W8A8` 在单张 CMP 170HX 10G 改 40G
+（最终 40 GiB、GA100、SM80）上运行 SGLang 0.5.16 的 `baseline`（MTP 关闭）与 `mtp`
 （MTP 开启）对照测试。标准运行的设定功率上限为 250 W。本文所有表格都来自标准运行
 `expanded-250w-v2-20260731`。
 
 相关文档：
-[`64 GiB 外部复现对照`](COMPARISON-64GB.zh-CN.md) |
-[`完整 Benchmark 管线与发布协议`](BENCHMARK-PROTOCOL.zh-CN.md)
+[`10G 改 40G 与 8G 改 64G 对照`](CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md) |
+[`完整 Benchmark 管线与发布协议`](CMP-170HX-Benchmark-Protocol.zh-CN.md)
 
 ## 测试结果
 
@@ -168,7 +168,7 @@ ShareGPT 源文件 SHA-256 是
 
 | 项目 | 实测值 |
 | --- | --- |
-| GPU | NVIDIA GA100 `[CMP 170HX]`，PCI ID `10de:2082`，SM80 |
+| GPU | NVIDIA GA100 `[CMP 170HX]` 10G 改 40G，PCI ID `10de:2082`，SM80 |
 | 显存 | 40960 MiB |
 | 标准运行的设定功率上限 | 250 W |
 | 最高 SM 频率 | 1410 MHz |

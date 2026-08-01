@@ -1,16 +1,26 @@
-# CMP 170HX 64 GiB External Reproduction vs 40 GiB
+# CMP 170HX 10G-to-40G vs 8G-to-64G Benchmark Comparison
 
-[English](COMPARISON-64GB.md) | [简体中文](COMPARISON-64GB.zh-CN.md)
+[English](CMP-170HX-10G-to-40G-vs-8G-to-64G.md) | [简体中文](CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md)
 
 This document converts the 14-page report supplied by 9527 vincentdim,
-`CMP-170HX_64GB_Qwen3.6-27B.pdf`, into searchable Markdown and compares it with
-this repository's 40 GiB canonical run, `expanded-250w-v2-20260731`. The PDF is
+`CMP-170HX_64GB_Qwen3.6-27B.pdf`, into searchable Markdown. It compares the
+external CMP 170HX 8G-to-64G report with this repository's CMP 170HX
+10G-to-40G canonical run, `expanded-250w-v2-20260731`. The PDF is
 used only as a local input and is **not committed to this repository**. Its
 local SHA-256 is recorded for source identification:
 
 ```text
 ef140ebde6888482dc4838afc9ce103f606ac28b0fbd45c2c5a6cddb95410f0e
 ```
+
+Naming is normalized throughout this repository:
+
+- `CMP 170HX 10G-to-40G` is the local card, with 40 GiB final memory.
+- `CMP 170HX 8G-to-64G` is the external card, with 64 GiB final memory.
+
+The modification origins are supplied by the card owners. The PDF itself
+confirms the external card's final 64 GB capacity but does not state its
+original 8 GB capacity.
 
 Only values that can be read unambiguously from the PDF are transcribed. The
 external JSONL, CSV, server logs, and SGLang patch referenced by the PDF were
@@ -24,9 +34,9 @@ records in this repository.
   repository's benchmark pipeline.
 - Both reports identify one CMP 170HX, SGLang 0.5.16, a 250 W power limit, and
   a checkpoint named `Qwen3.6-27B-INT8-W8A8`. The external host contains two
-  64 GiB cards, but the report used only `GPU 0`; this was not tensor parallel.
+  8G-to-64G cards, but the report used only `GPU 0`; this was not tensor parallel.
 - This is useful same-protocol external reproduction evidence, but it is not a
-  controlled 40 GiB versus 64 GiB hardware A/B. The external report explicitly
+  controlled 10G-to-40G versus 8G-to-64G hardware A/B. The external report explicitly
   used an additional SM80 `topk1` eager-equivalent fix and does not disclose
   the patch, SGLang source commit, checkpoint revision, or full environment.
 - Capacity alone does not make the same token workload faster. External
@@ -35,7 +45,7 @@ records in this repository.
   external report shows an MTP acceptance length of `4.000` for every completed
   MTP case, versus 2.91-3.50 in the local fixed matrix. That difference is a
   stronger explanation for the MTP-specific gain than memory capacity.
-- The 64 GiB report still used the same 24,576/20,480-token profiles and skipped
+- The 8G-to-64G report still used the same 24,576/20,480-token profiles and skipped
   the same six capacity cases. It contains no successful longer-capacity cells
   without a matching local case.
 
@@ -46,7 +56,7 @@ records in this repository.
 | Data author | 9527 vincentdim |
 | RUN_ID | `rep64g-20260801-052021` |
 | PDF generation date | 2026-08-01 |
-| GPU usage | Host with two 64 GiB CMP 170HX cards; benchmark used only `GPU 0` |
+| GPU usage | Host with two CMP 170HX 8G-to-64G cards; benchmark used only `GPU 0` |
 | Reported maximum SM clock | 1695 MHz |
 | Power-limit field | 250.00 W for every recorded case |
 | SGLang | 0.5.16 |
@@ -66,7 +76,7 @@ verified identity.
 
 These values are transcribed from PDF appendices A2 and A3. End-to-end output
 throughput includes TTFT; TPOT is the per-request mean. Speedup is
-`MTP enabled / MTP disabled` on the same 64 GiB card.
+`MTP enabled / MTP disabled` on the same 8G-to-64G card.
 
 | Prompt length (tokens) | Requested generation length (tokens) | E2E generation throughput, MTP disabled (output tok/s) | E2E generation throughput, MTP enabled (output tok/s) | MTP speedup | Mean TPOT, MTP disabled (ms) | Mean TPOT, MTP enabled (ms) | Reported MTP acceptance length |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -81,13 +91,13 @@ throughput includes TTFT; TPOT is the per-request mean. Speedup is
 | 8192 | 8192 | 41.00 | 111.54 | 2.72x | 24.10 | 8.69 | 4.00 |
 | 20480 | 1024 | 34.82 | 72.21 | 2.07x | 23.18 | 8.54 | 4.00 |
 
-### Difference from the local 40 GiB run
+### Difference from the local 10G-to-40G run
 
-`64 GiB / 40 GiB` is the ratio of reported end-to-end generation throughput.
+`8G-to-64G / 10G-to-40G` is the ratio of reported end-to-end generation throughput.
 It is not a causal memory-capacity speedup because software and hardware state
 were not fully controlled.
 
-| Prompt length | Requested generation length | 64 GiB / 40 GiB, MTP disabled | 64 GiB / 40 GiB, MTP enabled | 64 GiB MTP speedup | 40 GiB MTP speedup | 64 GiB reported acceptance | 40 GiB measured acceptance |
+| Prompt length | Requested generation length | 8G-to-64G / 10G-to-40G, MTP disabled | 8G-to-64G / 10G-to-40G, MTP enabled | 8G-to-64G MTP speedup | 10G-to-40G MTP speedup | 8G-to-64G reported acceptance | 10G-to-40G measured acceptance |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1024 | 1024 | 1.104x | 1.505x | 2.62x | 1.92x | 4.00 | 2.96 |
 | 1024 | 4096 | 1.029x | 1.388x | 2.82x | 2.09x | 4.00 | 3.18 |
@@ -133,7 +143,7 @@ four requests; TPOT remains a per-request metric.
 | 4096 | 512 | 95.06 | 196.39 | 2.07x | 26.02 | 10.28 | 4.00 |
 | 4096 | 1024 | 102.58 | 239.23 | 2.33x | 25.69 | 9.77 | 4.00 |
 
-| Prompt length | Requested generation length | 64 GiB / 40 GiB, MTP disabled | 64 GiB / 40 GiB, MTP enabled | 64 GiB MTP speedup | 40 GiB MTP speedup | 64 GiB reported acceptance | 40 GiB measured acceptance |
+| Prompt length | Requested generation length | 8G-to-64G / 10G-to-40G, MTP disabled | 8G-to-64G / 10G-to-40G, MTP enabled | 8G-to-64G MTP speedup | 10G-to-40G MTP speedup | 8G-to-64G reported acceptance | 10G-to-40G measured acceptance |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 2048 | 512 | 1.099x | 1.387x | 2.08x | 1.65x | 4.00 | 3.03 |
 | 2048 | 1024 | 1.046x | 1.445x | 2.46x | 1.78x | 4.00 | 3.05 |
@@ -143,13 +153,13 @@ four requests; TPOT remains a per-request metric.
 
 ## Real datasets
 
-The table includes both the external 64 GiB report and the local canonical
+The table includes both the external 8G-to-64G report and the local 10G-to-40G canonical
 run. The LongBench-v2 local JSONL SHA matches. ShareGPT aggregate input/output,
 median, and maximum token counts match exactly, but the PDF says that the file
 SHA differs. Without external per-request JSONL, byte-for-byte row identity
 cannot be established.
 
-| Dataset | Maximum concurrency | 64 GiB MTP disabled (output tok/s) | 64 GiB MTP enabled (output tok/s) | 64 GiB MTP speedup | 40 GiB MTP disabled (output tok/s) | 40 GiB MTP enabled (output tok/s) | 40 GiB MTP speedup | 64 GiB reported acceptance | 40 GiB measured acceptance |
+| Dataset | Maximum concurrency | 8G-to-64G MTP disabled (output tok/s) | 8G-to-64G MTP enabled (output tok/s) | 8G-to-64G MTP speedup | 10G-to-40G MTP disabled (output tok/s) | 10G-to-40G MTP enabled (output tok/s) | 10G-to-40G MTP speedup | 8G-to-64G reported acceptance | 10G-to-40G measured acceptance |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | ShareGPT | 1 | 43.097 | 111.273 | 2.58x | 40.513 | 75.597 | 1.87x | 4.000 | 2.984 |
 | LongBench-v2 natural 10-token output | 1 | 2.114 | 2.185 | 1.03x | 2.219 | 2.181 | 0.98x | 4.000 | 3.100 |
@@ -177,7 +187,7 @@ power use the report's active-sample definition.
 
 ## Why the external report is faster
 
-### It is not caused by the number “64 GiB” itself
+### It is not caused by the final 64 GiB capacity itself
 
 Capacity determines whether weights, KV/GDN state, CUDA Graphs, context, and
 concurrency fit. Once the same workload already fits and uses the same token
@@ -211,7 +221,7 @@ requires the external SGLang diff and raw JSONL acceptance counters.
 ### Clock, HBM, and platform differences can still contribute
 
 The PDF labels 1695 MHz versus 1410 MHz for the local profile. Firmware, power
-curves, cooling, and sustained clocks can differ. A 64 GiB memory modification
+curves, cooling, and sustained clocks can differ. An 8G-to-64G memory modification
 may also involve different HBM devices, channel state, or VBIOS. The PDF does
 not disclose HBM clock/bus, sustained bandwidth, PCIe, driver, or VBIOS, so the
 remaining difference cannot be assigned quantitatively. Long-output telemetry
@@ -221,14 +231,14 @@ that “1695 MHz maximum” was not a sustained runtime clock.
 ## Can these runs be compared directly?
 
 The metrics and reproduction trends can be compared. The difference cannot be
-attributed directly to 40 GiB versus 64 GiB.
+attributed directly to 10G-to-40G versus 8G-to-64G.
 
 | Comparison use | Conclusion |
 | --- | --- |
 | Confirm that the same matrix runs | Yes |
 | Compare enabled/disabled MTP benefit within each machine | Yes, and this is valuable |
 | Compare reported throughput at matching prompt/output/concurrency | Yes, if labeled as a cross-system report ratio |
-| Prove how much 64 GiB capacity accelerates the model | No |
+| Prove how much the 8G-to-64G modification accelerates the model | No |
 | Prove the speedup from the `topk1` patch | No; a same-card patch-off/patch-on A/B is missing |
 | Compare LongBench-v2 fixed 512 | Relatively strong same-dataset evidence, but software/hardware confounders remain |
 | Compare ShareGPT | Approximate only because file SHA differs |
@@ -239,5 +249,5 @@ requires identical SGLang commit/diff, checkpoint revision, config hash,
 driver/CUDA/PyTorch, MTP arguments, power/clock policy, and dataset SHA, with
 raw JSONL, server logs, manifest, and per-case telemetry retained.
 
-See [`BENCHMARK-PROTOCOL.md`](BENCHMARK-PROTOCOL.md) for the complete rerun and
+See [`CMP-170HX-Benchmark-Protocol.md`](CMP-170HX-Benchmark-Protocol.md) for the complete rerun and
 publication contract.

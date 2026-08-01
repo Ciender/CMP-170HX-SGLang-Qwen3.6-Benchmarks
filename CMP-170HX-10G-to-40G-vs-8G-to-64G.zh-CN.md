@@ -1,15 +1,24 @@
-# CMP 170HX 64 GiB 外部复现结果与 40 GiB 对照
+# CMP 170HX 10G 改 40G 与 8G 改 64G 推理测试对照
 
-[English](COMPARISON-64GB.md) | [简体中文](COMPARISON-64GB.zh-CN.md)
+[English](CMP-170HX-10G-to-40G-vs-8G-to-64G.md) | [简体中文](CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md)
 
 本文将 9527 vincentdim 提供的 14 页报告
-`CMP-170HX_64GB_Qwen3.6-27B.pdf` 摘要为可检索、可审阅的 Markdown，并与本仓库
-40 GiB canonical run `expanded-250w-v2-20260731` 对照。PDF 只作为本地输入，
+`CMP-170HX_64GB_Qwen3.6-27B.pdf` 摘要为可检索、可审阅的 Markdown，并将外部
+CMP 170HX 8G 改 64G 报告与本仓库 CMP 170HX 10G 改 40G canonical run
+`expanded-250w-v2-20260731` 对照。PDF 只作为本地输入，
 **不纳入 Git 仓库**。为便于确认来源，本地 PDF 的 SHA-256 为：
 
 ```text
 ef140ebde6888482dc4838afc9ce103f606ac28b0fbd45c2c5a6cddb95410f0e
 ```
+
+本文统一使用以下改卡名称：
+
+- `CMP 170HX 10G 改 40G`：本机测试卡，最终显存 40 GiB。
+- `CMP 170HX 8G 改 64G`：外部测试卡，最终显存 64 GiB。
+
+原始显存身份来自两张卡的所有者提供的信息。PDF 本身确认了外部卡最终为 64GB，
+但没有在报告正文中注明其原始 8G 身份。
 
 本文只转录 PDF 中能够明确读出的结果，不补造缺失的环境字段。PDF 内引用的外部
 JSONL、CSV、服务日志和 SGLang patch 没有随 PDF 提供，因此这些外部结果无法在本
@@ -20,16 +29,16 @@ JSONL、CSV、服务日志和 SGLang patch 没有随 PDF 提供，因此这些�
 - 外部报告完成 50 个 case，另有 6 个容量跳过；测试矩阵、请求数、结果路径命名和
   指标定义与本仓库管线一致。
 - 两边均标称单张 CMP 170HX、SGLang 0.5.16、250 W 和同名
-  `Qwen3.6-27B-INT8-W8A8`。外部主机装有 2 张 64 GiB 卡，但报告数据来自单卡
+  `Qwen3.6-27B-INT8-W8A8`。外部主机装有 2 张 8G 改 64G 卡，但报告数据来自单卡
   `GPU 0`，不是双卡 tensor parallel。
-- 这是一组有价值的“同协议外部复现”，但不是严格的 40 GiB 对 64 GiB 硬件 A/B。
+- 这是一组有价值的“同协议外部复现”，但不是严格的 10G 改 40G 对 8G 改 64G 硬件 A/B。
   外部报告明确使用了额外的 SM80 `topk1` eager 等价修复，却没有给出 patch、
   SGLang source commit、checkpoint revision 或完整硬件环境。
 - 64 GiB 容量本身不会让相同 token 工作负载自动变快。外部 MTP 关闭结果相对本机
   通常只快 0.8%-10.4%，但 MTP 开启快 19.6%-50.5%。更显著的差异是外部报告的
   MTP 接受长度在所有已完成 MTP case 中均为 `4.000`，而本机固定长度矩阵为
   2.91-3.50。这个差异比显存容量更能解释 MTP 专属的吞吐提升。
-- 外部 64 GiB 报告仍按本仓库的 24,576/20,480-token profile 执行，并跳过相同的
+- 外部 8G 改 64G 报告仍按本仓库的 24,576/20,480-token profile 执行，并跳过相同的
   6 个容量 case；它没有提供可与本机配对之外的更长上下文成功结果。
 
 ## 外部报告环境
@@ -39,7 +48,7 @@ JSONL、CSV、服务日志和 SGLang patch 没有随 PDF 提供，因此这些�
 | 数据作者 | 9527 vincentdim |
 | RUN_ID | `rep64g-20260801-052021` |
 | PDF 生成时间 | 2026-08-01 |
-| GPU 使用方式 | 装有 2 张 64 GiB CMP 170HX 的主机，只测试 `GPU 0` 单卡 |
+| GPU 使用方式 | 装有 2 张 CMP 170HX 8G 改 64G 的主机，只测试 `GPU 0` 单卡 |
 | 报告标注最高 SM 频率 | 1695 MHz |
 | 功率限制字段 | 全部已记录 case 为 250.00 W |
 | SGLang | 0.5.16 |
@@ -57,7 +66,7 @@ JSONL、CSV、服务日志和 SGLang patch 没有随 PDF 提供，因此这些�
 ## 单请求长输出
 
 以下值来自 PDF 附录 A2/A3。端到端生成吞吐包含 TTFT；TPOT 是每个请求的平均值。
-加速比为同一台 64 GiB 卡上的 `MTP 开启 / MTP 关闭`。
+加速比为同一台 8G 改 64G 卡上的 `MTP 开启 / MTP 关闭`。
 
 | Prompt 长度 (tokens) | 请求生成长度 (tokens) | 端到端生成吞吐，MTP 关闭 (output tok/s) | 端到端生成吞吐，MTP 开启 (output tok/s) | MTP 加速比 | 平均 TPOT，MTP 关闭 (ms) | 平均 TPOT，MTP 开启 (ms) | 报告的 MTP 接受长度 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -72,12 +81,12 @@ JSONL、CSV、服务日志和 SGLang patch 没有随 PDF 提供，因此这些�
 | 8192 | 8192 | 41.00 | 111.54 | 2.72x | 24.10 | 8.69 | 4.00 |
 | 20480 | 1024 | 34.82 | 72.21 | 2.07x | 23.18 | 8.54 | 4.00 |
 
-### 与本机 40 GiB 的差异
+### 与本机 10G 改 40G 的差异
 
-`64 GiB / 40 GiB` 是两份报告的端到端生成吞吐之比。它不是只改变显存容量后的
+`8G 改 64G / 10G 改 40G` 是两份报告的端到端生成吞吐之比。它不是只改变显存容量后的
 因果加速比，因为软件和硬件状态并未完全锁定。
 
-| Prompt 长度 | 请求生成长度 | 64 GiB / 40 GiB，MTP 关闭 | 64 GiB / 40 GiB，MTP 开启 | 64 GiB MTP 加速比 | 40 GiB MTP 加速比 | 64 GiB 报告接受长度 | 40 GiB 实测接受长度 |
+| Prompt 长度 | 请求生成长度 | 8G 改 64G / 10G 改 40G，MTP 关闭 | 8G 改 64G / 10G 改 40G，MTP 开启 | 8G 改 64G MTP 加速比 | 10G 改 40G MTP 加速比 | 8G 改 64G 报告接受长度 | 10G 改 40G 实测接受长度 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1024 | 1024 | 1.104x | 1.505x | 2.62x | 1.92x | 4.00 | 2.96 |
 | 1024 | 4096 | 1.029x | 1.388x | 2.82x | 2.09x | 4.00 | 3.18 |
@@ -121,7 +130,7 @@ per-request 指标。
 | 4096 | 512 | 95.06 | 196.39 | 2.07x | 26.02 | 10.28 | 4.00 |
 | 4096 | 1024 | 102.58 | 239.23 | 2.33x | 25.69 | 9.77 | 4.00 |
 
-| Prompt 长度 | 请求生成长度 | 64 GiB / 40 GiB，MTP 关闭 | 64 GiB / 40 GiB，MTP 开启 | 64 GiB MTP 加速比 | 40 GiB MTP 加速比 | 64 GiB 报告接受长度 | 40 GiB 实测接受长度 |
+| Prompt 长度 | 请求生成长度 | 8G 改 64G / 10G 改 40G，MTP 关闭 | 8G 改 64G / 10G 改 40G，MTP 开启 | 8G 改 64G MTP 加速比 | 10G 改 40G MTP 加速比 | 8G 改 64G 报告接受长度 | 10G 改 40G 实测接受长度 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 2048 | 512 | 1.099x | 1.387x | 2.08x | 1.65x | 4.00 | 3.03 |
 | 2048 | 1024 | 1.046x | 1.445x | 2.46x | 1.78x | 4.00 | 3.05 |
@@ -131,12 +140,12 @@ per-request 指标。
 
 ## 真实数据集
 
-下表同时列出外部 64 GiB 报告和本仓库 40 GiB canonical run。LongBench-v2 的
+下表同时列出外部 8G 改 64G 报告和本仓库 10G 改 40G canonical run。LongBench-v2 的
 本地 JSONL SHA 相同，可以按同一 prompt 集合对照。ShareGPT 两边的总输入、总输出、
 中位数和最大值完全一致，但 PDF 声明文件 SHA 不同；没有外部逐请求 JSONL 时，不能
 证明每条文本逐字一致。
 
-| 数据集 | 最大并发 | 64 GiB MTP 关闭 (output tok/s) | 64 GiB MTP 开启 (output tok/s) | 64 GiB MTP 加速比 | 40 GiB MTP 关闭 (output tok/s) | 40 GiB MTP 开启 (output tok/s) | 40 GiB MTP 加速比 | 64 GiB 报告接受长度 | 40 GiB 实测接受长度 |
+| 数据集 | 最大并发 | 8G 改 64G MTP 关闭 (output tok/s) | 8G 改 64G MTP 开启 (output tok/s) | 8G 改 64G MTP 加速比 | 10G 改 40G MTP 关闭 (output tok/s) | 10G 改 40G MTP 开启 (output tok/s) | 10G 改 40G MTP 加速比 | 8G 改 64G 报告接受长度 | 10G 改 40G 实测接受长度 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | ShareGPT | 1 | 43.097 | 111.273 | 2.58x | 40.513 | 75.597 | 1.87x | 4.000 | 2.984 |
 | LongBench-v2 自然输出 10 tokens | 1 | 2.114 | 2.185 | 1.03x | 2.219 | 2.181 | 0.98x | 4.000 | 3.100 |
@@ -163,7 +172,7 @@ LongBench-v2 自然输出只有 10 tokens，端到端速度几乎完全由长 pr
 
 ## 为什么外部结果更快
 
-### 不是因为“64 GiB 这个数字”本身
+### 不是因为改到 64 GiB 这个容量本身
 
 显存容量决定能否装下模型、KV/GDN state、CUDA Graph，以及能支持多长上下文和多大
 并发。对已经装得下、且使用相同 token pool 的工作负载，空闲显存不会直接变成更多
@@ -189,21 +198,21 @@ speculative cycle 就越少。因此外部报告的大部分额外优势是 MTP-
 ### 频率、HBM 和系统环境仍可能贡献一部分
 
 PDF 标注 1695 MHz，而本机 profile 标注 1410 MHz；固件、功耗曲线、散热和实际运行
-时钟都可能不同。64 GiB 改卡也可能使用不同的 HBM 颗粒、通道状态或 VBIOS。但 PDF
+时钟都可能不同。8G 改 64G 也可能使用不同的 HBM 颗粒、通道状态或 VBIOS。但 PDF
 没有提供 HBM 频率/总线、可持续带宽、PCIe、驱动或 VBIOS，不能把剩余差异进一步
 定量归因。PDF 的长输出遥测里实际 SM 时钟常降到约 1200-1340 MHz，也说明“最高
 1695 MHz”不能直接当成全程运行频率。
 
 ## 能不能直接比较
 
-可以比较指标和复现趋势，不能把差异直接归因于 40 GiB/64 GiB。
+可以比较指标和复现趋势，不能把差异直接归因于 10G 改 40G/8G 改 64G。
 
 | 比较用途 | 结论 |
 | --- | --- |
 | 验证同一测试矩阵能否跑通 | 可以 |
 | 比较 MTP 开启/关闭在各自机器上的相对收益 | 可以，且很有价值 |
 | 对照相同 prompt/output/concurrency 的报告吞吐 | 可以，但必须标成跨系统报告比值 |
-| 证明 64 GiB 显存让模型快多少 | 不可以 |
+| 证明 8G 改 64G 让模型快多少 | 不可以 |
 | 证明 `topk1` patch 带来多少提升 | 不可以，缺少同卡 patch 开/关 A/B |
 | 对比 LongBench-v2 固定 512 | 较强的同数据集对照，但仍有软件/硬件混杂变量 |
 | 对比 ShareGPT | 只能作为近似对照，文件 SHA 不同 |
@@ -214,4 +223,4 @@ PDF 标注 1695 MHz，而本机 profile 标注 1410 MHz；固件、功耗曲线�
 server log、manifest 和逐 case 遥测。
 
 完整的复跑与发布要求见
-[`BENCHMARK-PROTOCOL.zh-CN.md`](BENCHMARK-PROTOCOL.zh-CN.md)。
+[`CMP-170HX-Benchmark-Protocol.zh-CN.md`](CMP-170HX-Benchmark-Protocol.zh-CN.md)。

@@ -1,6 +1,6 @@
-# Benchmark 完整管线与发布协议
+# CMP 170HX 10G 改 40G / 8G 改 64G Benchmark 完整管线与发布协议
 
-[English](BENCHMARK-PROTOCOL.md) | [简体中文](BENCHMARK-PROTOCOL.zh-CN.md)
+[English](CMP-170HX-Benchmark-Protocol.md) | [简体中文](CMP-170HX-Benchmark-Protocol.zh-CN.md)
 
 本文供复现者、代码审阅者和 AI agent 使用。它定义什么是一次完整的 CMP 170HX +
 SGLang + Qwen3.6 benchmark run，哪些 artifact 必须保留，以及什么时候两次 run 可以
@@ -36,7 +36,7 @@ SGLang + Qwen3.6 benchmark run，哪些 artifact 必须保留，以及什么时�
 
 ### 等级 B：受控 A/B
 
-目标是证明某一个变量的因果效果，例如 40 GiB 与 64 GiB、MTP patch 开启与关闭、
+目标是证明某一个变量的因果效果，例如 10G 改 40G 与 8G 改 64G、MTP patch 开启与关闭、
 或 120 W 与 250 W。除目标变量外，下列项目必须相同：
 
 - 同一张卡，或已证明等价的硬件 revision、VBIOS、HBM 总线/频率和时钟策略；
@@ -48,7 +48,7 @@ SGLang + Qwen3.6 benchmark run，哪些 artifact 必须保留，以及什么时�
 - 相同功率限制、swap 状态、后台 GPU 进程和 cache 策略；
 - 至少 3 个独立 RUN_ID，并交错或 counterbalance profile 执行顺序。
 
-当前 40 GiB 与外部 64 GiB 报告属于等级 A，不属于等级 B。
+当前 10G 改 40G 与外部 8G 改 64G 报告属于等级 A，不属于等级 B。
 
 ## 固定测试契约
 
@@ -315,5 +315,5 @@ dataset SHA
 7. 提交前运行 Markdown 表格列数检查、`git diff --check`、`shellcheck scripts/*.sh`
    和 `python3 -m py_compile scripts/*.py`。
 
-外部 64 GiB 报告的结构化摘要和可比性分析见
-[`COMPARISON-64GB.zh-CN.md`](COMPARISON-64GB.zh-CN.md)。
+10G 改 40G 与外部 8G 改 64G 的结构化对照见
+[`CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md`](CMP-170HX-10G-to-40G-vs-8G-to-64G.zh-CN.md)。
