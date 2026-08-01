@@ -1,348 +1,280 @@
-# CMP 170HX 10G-to-40G / 8G-to-64G Benchmark Protocol
+# SGLang Model Benchmark and Publication Protocol
 
 [English](CMP-170HX-Benchmark-Protocol.md) | [简体中文](CMP-170HX-Benchmark-Protocol.zh-CN.md)
 
-This document is the operating contract for reproducers, reviewers, and AI
-agents. It defines a complete CMP 170HX + SGLang + Qwen3.6 benchmark run, the
-artifacts that must be retained, and when two runs may be compared.
+This document defines the repository's standard benchmark contract. It applies
+to CMP 170HX and other NVIDIA GPUs, and to Qwen3.6-27B or a user-supplied
+SGLang checkpoint. The core matrix supports cross-system comparisons; the
+extended matrix exposes long-context capacity on 64/80 GiB and larger systems.
 
-## Current automation status
+Standard pipeline v1 is single-GPU and requires `TP_SIZE=1`. Multi-GPU tensor
+parallel needs rank/GPU-indexed telemetry and capacity schema before it can be
+published as a standard run; do not mix multiple GPU streams into one table.
 
-The repository has an executable core pipeline, but not a fully automated
-run-to-publication pipeline.
+## Principles
 
-| Stage | Current state | Entry point |
-| --- | --- | --- |
-| GPU/power/swap/process preflight | Automated | `scripts/run-250w-suite.sh` |
-| Server startup and profile-capacity validation | Automated | `scripts/serve-qwen36-27b.sh`, `/server_info` |
-| Fixed-length and real-dataset requests | Automated | `scripts/run-250w-suite.sh`, `scripts/bench-serving.sh` |
-| 200 ms NVML telemetry | Automated | `scripts/monitor-gpu.sh` |
-| Case manifest and raw JSONL | Automated | `scripts/run-250w-suite.sh` |
-| Environment capture | Partially automated | `scripts/collect-environment.sh` |
-| Serving/power aggregation | Tool exists; separate invocation required | `scripts/summarize-expanded.py` |
-| Checkpoint revision, complete software diff, and dataset-hash gates | Partially missing | Must be recorded and checked |
-| Integrity acceptance, cross-run comparison, publication bundle | Not one-command automated | Follow this document |
-| Independent repetitions and randomized/interleaved profile order | Not automated | Required before strict hardware claims |
+1. **Start the server before planning cases.** GPU memory size cannot be
+   converted directly into a token limit. Weights, quantization, KV dtype,
+   architecture, MTP draft state, GDN/Mamba state, and CUDA Graphs all affect
+   capacity. Planning uses live `/server_info` context, token-pool, and
+   effective-running-request values.
+2. **Separate comparability from capacity.** Every machine attempts the `core`
+   tier. The `extended` tier adds 32K-131K inputs only when actual capacity permits.
+3. **A skip is not zero throughput.** Unsupported cases are recorded as
+   `skipped-context` or `skipped-capacity`, never failure, zero tok/s, or a
+   silently omitted row.
+4. **Spell out MTP state.** Published labels use `MTP enabled`, `MTP disabled`,
+   or `MTP unavailable`. MTP speedup is always enabled / disabled for the same
+   environment and cell.
+5. **Generate reports from structured artifacts.** Markdown and PDF use the
+   same metadata, manifest, and CSV files; values are not manually copied.
 
-The repository therefore does need a complete pipeline protocol. Existing
-scripts reproduce canonical v2, but another tester cannot obtain strictly
-comparable numbers merely by running them without locking inputs and revisions.
-
-## Two reproduction levels
-
-### Level A: protocol reproduction
-
-Use the same case matrix, metric definitions, and main serving arguments to
-test whether another environment reproduces the trend. Hardware, driver, or a
-clearly disclosed software patch may differ. Publish this as external
-reproduction or a cross-system comparison; do not attribute the difference to
-one variable.
-
-### Level B: controlled A/B
-
-Measure the causal effect of one variable, such as 10G-to-40G versus 8G-to-64G, patch
-disabled versus enabled, or 120 W versus 250 W. Except for the target variable,
-the following must be identical:
-
-- the same card, or verified equivalent hardware revision, VBIOS, HBM bus/clock,
-  and clock policy;
-- the same SGLang commit and clean/dirty state, with the full patch retained;
-- the same checkpoint repository and immutable revision;
-- the same `config.json`, `generation_config.json`, `recipe.yaml`, and MTP file;
-- the same driver, CUDA, Python, PyTorch, Triton, and FlashInfer;
-- the same prompts, ordering, seed, output lengths, concurrency, and sampling;
-- the same power limit, swap state, background GPU processes, and cache policy;
-- at least three independent RUN_IDs with counterbalanced profile order.
-
-The current 10G-to-40G run and external 8G-to-64G report are Level A, not Level B.
-
-## Fixed test contract
-
-### Checkpoint
+## Standard pipeline
 
 ```text
-Repository: https://huggingface.co/Avesed/Qwen3.6-27B-INT8-W8A8
-Base model: https://huggingface.co/Qwen/Qwen3.6-27B
+benchmark.env
+    │
+    ├─ collect-run-metadata.py     host, GPU, software, model, weights, datasets
+    ├─ serve-model.sh              model-neutral SGLang launcher
+    ├─ capture-profile.py          live capacity, residency, KV/state/graphs
+    ├─ plan-benchmark.py           core + extended planning and skip reasons
+    ├─ bench-serving.sh            fixed-length requests
+    ├─ monitor-gpu.sh              NVML telemetry
+    ├─ summarize-expanded.py       serving.csv + power.csv
+    └─ generate-report.py          report.md + report.pdf
 ```
 
-A repository name is insufficient. A new run must record the Hugging Face
-commit revision or SHA-256 for all critical files, including:
-
-```text
-config.json
-generation_config.json
-recipe.yaml
-model.safetensors
-mtp.safetensors
-tokenizer/config/template files
-```
-
-When hashing large weights is impractical, record the immutable Hugging Face
-revision and repository LFS oid for each safetensors file. A local directory
-name alone is not an identity.
-
-### SGLang and patches
-
-Record:
+Entry point:
 
 ```bash
-git -C "$SGLANG_SOURCE" rev-parse HEAD
-git -C "$SGLANG_SOURCE" status --short
-git -C "$SGLANG_SOURCE" diff --binary
+cp configs/benchmark.example.env /tmp/my-benchmark.env
+# Edit paths, model, context, MTP, and power settings.
+sudo -E scripts/run-standard-suite.sh /tmp/my-benchmark.env
 ```
 
-If the worktree is dirty, save the diff with the run artifacts. `SGLang 0.5.16`
-alone cannot distinguish the upstream tag, a 170HX patch, a `topk1` fix, or
-uncommitted local changes.
+`scripts/test-pipeline.sh` currently covers offline planning for representative
+32/40/64/80 GiB-like live capacities plus standardized tables and PDF output.
+Treat the generic launcher and full runner as a candidate pipeline until its
+first live-model end-to-end qualification. Existing 10G canonical data was
+produced by the legacy pipeline and is unaffected.
 
-### Datasets
+Use a new `RUN_ID` for every changed configuration. Existing bundles are not
+overwritten by default; use `RESUME=1` only when all configuration is unchanged.
 
-Canonical v2 uses:
+## Model and server configuration
+
+Required:
 
 ```text
-ShareGPT SHA-256:
-35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4
-
-Prepared LongBench-v2 JSONL SHA-256:
-93ecd8a799ba868cfb2a1c28a38ce87653cb30eb211712030970020d39990058
+MODEL_PATH
+MODEL_NAME
+RUN_ID
+SGLANG_VENV
+CONTEXT_LENGTH (may be `auto`)
 ```
 
-Runs with different dataset hashes are not strict per-request comparisons.
-Even when aggregate prompt/output token counts match, label them
-distribution-matched unless normalized row-content hashes are also identical.
-
-### Profiles
-
-Published tables must spell out concurrency and MTP state. Do not use isolated
-`baseline`, `mtp`, `c1`, or `c4` as the only reader-facing label.
-
-| Maximum concurrency | MTP state | Context length | Total token pool | Static memory fraction | CUDA Graph batch sizes | Speculative decoding |
-| ---: | --- | ---: | ---: | ---: | --- | --- |
-| 1 | MTP disabled | 24576 | 24576 | 0.88 | 1 | Not applicable |
-| 1 | MTP enabled | 24576 | 24576 | 0.94 | 1 | EAGLE, 3 steps, top-k 1, 4 draft tokens |
-| 4 | MTP disabled | 24576 | 20480 | 0.88 | 1, 2, 4 | Not applicable |
-| 4 | MTP enabled | 24576 | 20480 | 0.98 | 1, 2, 3, 4 | EAGLE, 3 steps, top-k 1, 4 draft tokens |
-
-All profiles use page size 64, 2048-token chunked prefill, a 4096-token prefill
-ceiling, disabled prefill CUDA Graph, and disabled radix cache. Any deviation
-must be present in run metadata rather than silently changed.
-
-### Case matrix
-
-Single-request generation completes three requests per cell:
+Strongly recommended:
 
 ```text
-Prompt: 1024, 4096, 8192, 20480
-Requested generation: 1024, 4096, 8192
-Constraint: prompt + generation < 24576
+MODEL_REPOSITORY
+MODEL_REVISION
+SGLANG_SOURCE
+EXPECTED_POWER_LIMIT
 ```
 
-Prefill completes three requests per cell and generates one token per request:
-
-```text
-Prompt: 512, 2048, 4096, 8192, 12288, 20480
-```
-
-Maximum concurrency four completes 20 requests per cell:
-
-```text
-Prompt: 2048, 4096
-Requested generation: 512, 1024, 2048
-Constraint: 4 * (prompt + generation) <= 20480
-```
-
-Real datasets:
-
-```text
-ShareGPT: 30 requests at maximum concurrency 1, natural output
-ShareGPT: 20 requests at maximum concurrency 4, natural output
-LongBench-v2: 20 requests at maximum concurrency 1, natural 10-token output
-LongBench-v2: the same 20 requests, fixed generation 512
-```
-
-A complete run has 56 manifest rows: 50 passed and six skipped-capacity. A
-capacity skip is not a failure and must not be reported as zero throughput.
-
-## Complete execution flow
-
-### 1. Select an immutable RUN_ID
+Custom models must not inherit Qwen3.6-specific settings. Quantization,
+attention/sampling backends, reasoning/tool parsers, and `trust_remote_code`
+are explicit optional fields. A model without an integrated MTP/EAGLE head uses:
 
 ```bash
-export RUN_ID="cmp170hx-$(date +%Y%m%d-%H%M%S)"
-export SGLANG_RUNTIME_HOME=/path/to/sglang-runtime
-export SGLANG_VENV=/path/to/sglang-venv
-export SGLANG_SOURCE=/path/to/sglang-source
-export MODEL_PATH=/path/to/Qwen3.6-27B-INT8-W8A8
-export SHAREGPT_PATH=/path/to/sharegpt.json
-export LONGBENCH_PATH=/path/to/longbench-v2-prepared.jsonl
+MTP_MODES="disabled"
 ```
 
-Never reuse a RUN_ID for a changed configuration. Resuming a run may reuse only
-completed cases whose configuration is unchanged.
-
-### 2. Preflight
+A model with MTP support can compare:
 
 ```bash
-nvidia-smi -q -d POWER,CLOCK,MEMORY,PCI
-swapon --show
-nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv
-sha256sum "$SHAREGPT_PATH" "$LONGBENCH_PATH"
-git -C "$SGLANG_SOURCE" status --short
+MTP_MODES="disabled enabled"
+MTP_ALGORITHM=EAGLE
+MTP_STEPS=3
+MTP_TOPK=1
+MTP_DRAFT_TOKENS=4
 ```
 
-Hard gates:
+If the MTP profile cannot start, report the profile as unavailable. Do not
+silently change the draft model, concurrency, or token pool and claim the same
+configuration.
 
-- power limit equals the declared value;
-- swap is zero;
-- no other GPU compute process is active;
-- no server already owns port 8000;
-- checkpoint, dataset, and SGLang revisions are recorded;
-- host RAM is sufficient without swap or OOM retry.
+## Capacity rules
 
-### 3. Execute all cases
-
-Current canonical 250 W pipeline:
-
-```bash
-sudo -E env \
-  RUN_ID="$RUN_ID" \
-  RUN_REAL_DATASETS=1 \
-  SGLANG_RUNTIME_HOME="$SGLANG_RUNTIME_HOME" \
-  SGLANG_VENV="$SGLANG_VENV" \
-  SGLANG_SOURCE="$SGLANG_SOURCE" \
-  MODEL_PATH="$MODEL_PATH" \
-  SHAREGPT_PATH="$SHAREGPT_PATH" \
-  LONGBENCH_PATH="$LONGBENCH_PATH" \
-  scripts/run-250w-suite.sh
-```
-
-The suite starts each profile, queries `/server_info`, runs its cases, stops the
-server, and waits for memory release. Every case uses `--flush-cache`; benchmark
-warmup is zero while server-startup warmup remains enabled.
-
-### 4. Monitor
-
-`scripts/monitor-gpu.sh` samples every 200 ms by default:
+Capture these values after every profile starts:
 
 ```text
-timestamp
-power.draw
-power.limit
-utilization.gpu
-clocks.sm
-clocks.mem
-temperature.gpu
-pstate
+context_length
+max_total_tokens
+effective_max_running_requests
+GPU used/free memory after startup
+target and draft load-phase deltas
+target/draft KV cache size and dtype
+GDN/Mamba/recurrent state size, when reported
+CUDA Graph size
+pool-end free memory
 ```
 
-Manifest fields `start_epoch_ms`, `end_epoch_ms`, and `telemetry_file` are the
-only authoritative case-to-telemetry mapping. Do not approximate windows from
-filenames or reuse another profile's telemetry.
-
-### 5. Summarize
-
-```bash
-python3 scripts/summarize-expanded.py \
-  "results/case-manifest-$RUN_ID.csv" \
-  --repo-root "$PWD" \
-  --serving-output "results/serving-$RUN_ID.csv" \
-  --power-output "results/power-$RUN_ID.csv"
-```
-
-Keep the three metric classes separate:
-
-- `e2e_output_tok_s`: completed output tokens / benchmark wall time;
-- `input_tok_s`: completed input tokens / the same wall time;
-- `1000 / mean TPOT`: steady-decode approximation for maximum concurrency one
-  only.
-
-At maximum concurrency four, never substitute `1000 / TPOT` for aggregate
-output throughput.
-
-### 6. Accept the run
-
-Check every item before publication:
-
-- manifest has exactly 56 data rows with unique case keys;
-- 50 are `passed`, six are `skipped-capacity`, and none are `failed` or
-  `incomplete`;
-- the final summary record in every passed JSONL has `completed == requests`;
-- fixed cases have the declared input/output token counts;
-- MTP-disabled rows have no MTP acceptance length;
-- MTP acceptance is recomputed from raw fields and lies in a plausible range;
-  every row exactly equal to the draft ceiling requires manual review for a
-  field-semantics or summary bug;
-- `/server_info` token pool and effective maximum running requests match the
-  profile;
-- each case window is covered by its telemetry with acceptable intervals and
-  gaps;
-- environment records checkpoint revision, SGLang commit/diff state, and
-  dataset hashes;
-- README values can be recomputed from published CSVs, and manual transcription
-  is labeled with its source.
-
-### 7. Publish artifacts
-
-An auditable run publishes at least:
+A fixed-length case is runnable only if:
 
 ```text
-environment/<run-id>.txt
-results/case-manifest-<run-id>.csv
-results/serving-<run-id>.csv
-results/power-<run-id>.csv
+input_tokens + output_tokens < context_length
+max_concurrency * (input_tokens + output_tokens) <= max_total_tokens
+max_concurrency <= effective_max_running_requests
+```
+
+The first comparison is strict because generation needs a scheduling/token
+slot. The second is the shared token-pool bound. Real datasets must be
+tokenized first and checked per request; character counts are not capacity data.
+
+### Different memory capacities
+
+- **32/40 GiB:** run every `core` case that passes capacity checks and retain
+  explicit skip rows for longer cases. Never shorten inputs or outputs to fill a table.
+- **64/80 GiB:** complete the same core matrix, then run all capacity-safe
+  `extended` cases. Long-context results supplement rather than replace core data.
+- **Different models:** restart and recapture the token pool even on the same
+  GPU. Capacity from another model or quantization is not reusable.
+
+Standard matrix:
+
+| Tier | Workload | Input tokens | Output tokens | Maximum concurrency | Repetition |
+| --- | --- | --- | --- | ---: | ---: |
+| core | Prefill | 512, 2048, 4096, 8192, 12288, 20480 | 1 | 1 | 3 requests/cell |
+| core | Single-request generation | 1024, 4096, 8192, 20480 | 1024, 4096, 8192 | 1 | 3 requests/cell |
+| core | Concurrent generation | 2048, 4096 | 512, 1024, 2048 | configured, default 4 | 5 complete waves |
+| extended | Prefill | 32768, 49152, 65536, 98304, 131072 | 1 | 1 | 3 requests/cell |
+| extended | Single-request generation | 32768, 49152, 65536, 98304, 131072 | 1024, 4096, 8192 | 1 | 3 requests/cell |
+| extended | Concurrent generation | 8192, 16384, 32768 | 512, 1024, 2048 | configured | 5 complete waves |
+
+A JSON `MATRIX_FILE` may add model-specific cases. Removing core rows means the
+run is not a complete core reproduction. Cases beyond native model context are
+naturally recorded as `skipped-context`.
+
+## Required metadata
+
+### Run identity
+
+- RUN_ID, start time, timezone, tester, and data author;
+- benchmark repository commit;
+- SGLang commit, remote, dirty state, and patch;
+- every manually changed server argument.
+
+### GPU and host
+
+- GPU name, UUID, PCI ID, memory, compute capability, and VBIOS;
+- driver, power limit, maximum SM/memory clocks;
+- CPU, logical CPUs, host memory, swap, kernel, and OS;
+- tensor parallel size, visible GPUs, and other compute processes.
+
+### Model
+
+- local name, Hugging Face repository, and immutable revision;
+- architecture, model type, dtype, quantization method/format;
+- every safetensors filename and size, plus total weight bytes;
+- SHA-256 for config, tokenizer, templates, and quantization recipe;
+- native context, layer count, full-attention layers, KV heads, head dimension,
+  and KV dtype;
+- calculated target KV bytes/token only when configuration makes it reliable;
+- MTP weights, layers, draft settings, and embedding-sharing behavior.
+
+### Runtime GPU memory
+
+On-disk weights and GPU residency are different metrics. Report target/draft
+load deltas, KV caches, GDN/Mamba state, CUDA Graphs, startup GPU used/free, and
+token pool separately. Do not force allocator/context/workspace values into a
+false sum when logs do not separate them.
+
+## Metrics and tables
+
+- `input tok/s`: completed prompt tokens / complete request window;
+- `output tok/s`: completed generated tokens / the same window; aggregate
+  server throughput when concurrency exceeds one;
+- `TTFT`: latency to first generated token; lower is better;
+- `TPOT`: per-request time per output token after the first; lower is better;
+- `1000 / mean TPOT`: single-request steady-decode approximation only;
+- MTP acceptance: only for MTP-enabled data and interpreted with the draft ceiling.
+
+Report order:
+
+1. Run summary and model/GPU environment;
+2. Live profile capacity and GPU memory/KV/state accounting;
+3. Passed/skipped/failed counts;
+4. Same-cell MTP enabled/disabled speedups;
+5. Complete core table;
+6. Extended long-context table;
+7. Real datasets;
+8. Telemetry and limitations.
+
+Do not publish ambiguous labels such as only `off / 1024 / c1`. Use, for
+example, “maximum concurrency 1, MTP disabled, end-to-end output throughput
+(output tok/s).” Capacity-skip metric cells remain blank.
+
+## Preflight and monitoring
+
+Before testing, require zero swap, no other GPU compute process, a free server
+port, the configured power limit, recorded model/SGLang/dataset identity, and a
+new non-overwriting RUN_ID.
+
+Each profile gets a separate server log and NVML stream. The default monitor
+samples time, power, power limit, utilization, SM/memory clocks, temperature,
+and P-state at approximately 200 ms. Manifest millisecond windows are the only
+authoritative case-to-telemetry mapping.
+
+## Publication bundle
+
+```text
+runs/<run-id>/
+├── metadata.json
+├── profiles/*.json
+├── plans/*.csv
+├── case-manifest.csv
+├── serving.csv
+├── power.csv
+├── report.md
+└── report.pdf
+
 results/raw/<run-id>/*.jsonl
 results/logs/<run-id>/*.log
 results/telemetry/<run-id>/*.csv
-patches/<run-id>-sglang.diff       # when source is dirty or patched
 ```
 
-If raw artifacts are too large for Git, publish a downloadable archive, its
-SHA-256, and the generation command. PDF- or Markdown-only external results may
-be cited, but must be labeled as not recomputable from this repository.
+`generate-report.py` creates Markdown and PDF from the structured bundle. PDF
+is a reading artifact; CSV, JSONL, profile JSON, and metadata are the
+recomputable sources. If large artifacts are not stored in Git, publish an
+archive URL and SHA-256.
 
-## Cross-run comparison rules
+## Acceptance
 
-A comparison script or AI must first join by these fields, not table row number:
+Runs can contain different numbers of passed and skipped rows. The old fixed
+“56 rows, 50 passed” rule is not valid for arbitrary models and memory sizes.
+Before publication:
 
-```text
-workload
-prompt/input length
-requested output length
-maximum concurrency
-MTP state
-sampling parameters
-dataset SHA
-```
+- every planned case has one terminal manifest row;
+- terminal status is passed, an explicit skip, failed, or incomplete;
+- every passed JSONL has `completed == requests`;
+- skip notes include actual required tokens and context/token-pool capacity;
+- live effective concurrency satisfies the declared profile;
+- metadata identifies model, GPU, software, and SGLang source;
+- every passed case window maps to telemetry;
+- Markdown and PDF come from the same bundle;
+- diff, Bash syntax, Python compilation, and capacity fixtures pass.
 
-Then inspect environment differences and list every mismatch as a confounder.
-Never:
+A run with failed/incomplete rows may be published as a partial run, but the
+title and summary must say so. Missing cases must not be relabeled as capacity skips.
 
-- conflate `MTP enabled / MTP disabled` speedup with a `machine B / machine A`
-  throughput ratio;
-- compare input tok/s, output tok/s, and steady decode tok/s as one metric;
-- treat LongBench 10-token natural output as a decode benchmark;
-- encode a capacity skip as failure or 0 tok/s;
-- assume identical files from an identical checkpoint name;
-- ignore commit and patch because the SGLang version matches;
-- interpret additional memory capacity directly as additional throughput.
+## Cross-system comparison
 
-## AI-agent operating constraints
+Join only exact matches for model repository/revision, profile settings,
+workload, input, output, maximum concurrency, MTP state, sampling, and dataset
+content. Then disclose GPU, SGLang, driver, power, clocks, KV dtype, and backend
+differences.
 
-1. Read this file, the main README, environment record, manifest, and summarizer
-   before explaining results.
-2. Do not start a long benchmark or overwrite an existing RUN_ID unless the
-   user explicitly requests it.
-3. Do not modify or delete existing raw/log/telemetry artifacts; use a new run
-   directory.
-4. When summarizing an external report, retain author, date, RUN_ID, source-file
-   hash, and whether raw data is available.
-5. Label every calculated value with its formula and every transcribed value
-   with its source page/table or source CSV.
-6. Use unambiguous labels such as “maximum concurrency 4, MTP enabled,
-   aggregate output throughput.”
-7. Before committing, check Markdown table widths, run `git diff --check`,
-   `shellcheck scripts/*.sh`, and `python3 -m py_compile scripts/*.py`.
-
-See
-[`README.md`](README.md)
-for the structured 10G-to-40G versus 8G-to-64G comparison.
+More memory usually enables longer context or greater concurrency; it does not
+automatically make an identical case faster. MTP speedup is also distinct from
+a machine-B / machine-A throughput ratio.

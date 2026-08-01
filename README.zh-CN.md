@@ -83,6 +83,23 @@
 LongBench-v2 的 10-token 短答案用例主要测到长 prompt 的 prefill 时间，因此不能用
 这一行判断持续 decode 吞吐。固定生成 512 tokens 的结果更能体现 MTP 对生成阶段的收益。
 
+## 如何测试
+
+复制示例配置，填写 SGLang、模型、context、MTP 和功率参数，然后运行标准管线：
+
+```bash
+cp configs/benchmark.example.env /tmp/my-benchmark.env
+sudo -E scripts/run-standard-suite.sh /tmp/my-benchmark.env
+```
+
+管线会读取服务实际 token pool，自动计算每个输入/输出/并发组合是否能运行；小显存
+机器保留容量跳过项，大显存机器继续运行 extended 长上下文矩阵。结果位于
+`runs/<RUN_ID>/`，包含 metadata、容量/显存/KV 记录、CSV、Markdown 和 PDF。
+自定义模型及完整字段说明见
+[`测试与发布规范`](CMP-170HX-Benchmark-Protocol.zh-CN.md)；AI agent 必须同时遵守
+[`AGENTS.md`](AGENTS.md)。容量规划、CSV/Markdown/PDF 生成已通过离线 fixture；
+新通用启动与执行器仍需用首个真实模型 run 完成端到端验收。
+
 ## 如何理解两张卡的差异
 
 最终显存容量决定模型、KV/GDN state、CUDA Graph、上下文和并发能否装下，但相同
@@ -101,13 +118,14 @@ tokens，完成相同输出所需的 speculative cycles 更少。
 CMP-170HX-10G.zh-CN.md       10G 完整结果、环境、显存和复现方法
 CMP-170HX-8G.zh-CN.md        8G 完整结果与遥测
 scripts/                     启动、测试、监控和汇总脚本
+configs/                     标准管线配置模板
+runs/<run-id>/               自动生成的 metadata、计划、CSV、Markdown、PDF
 environment/                 10G 测试环境记录
 results/                     10G 汇总 CSV 与原始 NVML 遥测
 ```
 
-测试协议草案保留在
-[`CMP-170HX-Benchmark-Protocol.zh-CN.md`](CMP-170HX-Benchmark-Protocol.zh-CN.md)，
-当前不作为已完成的自动化管线说明。
+完整执行与发布合同见
+[`CMP-170HX-Benchmark-Protocol.zh-CN.md`](CMP-170HX-Benchmark-Protocol.zh-CN.md)。
 
 ## 许可证与致谢
 

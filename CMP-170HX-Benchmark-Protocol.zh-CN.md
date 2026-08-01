@@ -1,319 +1,269 @@
-# CMP 170HX 10G 改 40G / 8G 改 64G Benchmark 完整管线与发布协议
+# SGLang 模型推理测试与发布规范
 
 [English](CMP-170HX-Benchmark-Protocol.md) | [简体中文](CMP-170HX-Benchmark-Protocol.zh-CN.md)
 
-本文供复现者、代码审阅者和 AI agent 使用。它定义什么是一次完整的 CMP 170HX +
-SGLang + Qwen3.6 benchmark run，哪些 artifact 必须保留，以及什么时候两次 run 可以
-横向比较。
+本文定义本仓库的标准测试合同。它既适用于 CMP 170HX，也适用于其他 NVIDIA GPU；
+既可以测试 Qwen3.6-27B，也可以测试用户提供的其他 SGLang checkpoint。固定矩阵用于
+横向比较，扩展矩阵用于发挥 64/80 GiB 或更大显存机器的长上下文能力。
 
-## 当前自动化状态
+当前标准管线 v1 限定单 GPU、`TP_SIZE=1`。多卡 tensor parallel 需要为遥测和容量
+schema 增加 rank/GPU index 后才能作为标准结果发布，不能把多卡采样混进单卡表格。
 
-仓库已经有可运行的核心管线，但还不是完全自动化的“运行到发布”流水线。
+## 设计原则
 
-| 阶段 | 当前状态 | 入口 |
-| --- | --- | --- |
-| GPU/功率/swap/占用进程预检 | 已自动化 | `scripts/run-250w-suite.sh` |
-| 服务启动和 profile 容量验证 | 已自动化 | `scripts/serve-qwen36-27b.sh`、`/server_info` |
-| 固定长度和真实数据集请求 | 已自动化 | `scripts/run-250w-suite.sh`、`scripts/bench-serving.sh` |
-| 200 ms NVML 遥测 | 已自动化 | `scripts/monitor-gpu.sh` |
-| case manifest 和原始 JSONL | 已自动化 | `scripts/run-250w-suite.sh` |
-| 环境采集 | 部分自动化 | `scripts/collect-environment.sh` |
-| serving/power 汇总 | 已有工具，但需单独执行 | `scripts/summarize-expanded.py` |
-| checkpoint revision、完整软件 diff 和数据集 hash 门禁 | 部分缺失 | 必须人工补录并检查 |
-| 结果完整性验收、跨 run 比较、发布包生成 | 尚未一键自动化 | 按本文检查 |
-| 多个独立 run、随机/交错 profile 顺序 | 尚未自动化 | 严格硬件结论前必须补做 |
+1. **先启动、再规划**：显存容量不能直接换算成 token 上限。权重大小、量化格式、
+   KV dtype、模型层结构、MTP draft、GDN/Mamba state 和 CUDA Graph 都会占用显存。
+   测试矩阵必须使用 SGLang 启动后 `/server_info` 返回的实际 context、token pool 和
+   effective maximum running requests。
+2. **可比矩阵与能力矩阵分开**：`core` tier 尽量由所有机器运行；`extended` tier
+   包含 32K-131K 输入，只有实际容量允许时才运行。
+3. **跳过不是零分**：不满足上下文或总 token pool 的 case 分别记录为
+   `skipped-context` 或 `skipped-capacity`，不能记为失败、0 tok/s 或删除。
+4. **MTP 开关写完整**：表格使用 `MTP 开启`、`MTP 关闭`或 `MTP 不可用`；MTP
+   加速比始终是同一环境同一 cell 的 `MTP 开启 / MTP 关闭`。
+5. **所有结论来自结构化产物**：Markdown 和 PDF 从相同的 metadata、manifest 和
+   CSV 自动生成，不手工复制数值。
 
-因此答案是：**需要完整管线协议**。现有脚本足以复现 canonical v2，但其他测试者若
-只运行脚本、不锁定输入和代码 revision，生成的数字不能自动与本仓库严格横比。
-
-## 两个复现等级
-
-### 等级 A：协议复现
-
-目标是使用相同 case 矩阵、指标定义和主要启动参数，判断另一个环境能否复现趋势。
-允许硬件、驱动或明确记录的软件 patch 不同。发布时必须称为“外部复现”或“跨系统
-对照”，不能把差异归因给某一个变量。
-
-### 等级 B：受控 A/B
-
-目标是证明某一个变量的因果效果，例如 10G 改 40G 与 8G 改 64G、MTP patch 开启与关闭、
-或 120 W 与 250 W。除目标变量外，下列项目必须相同：
-
-- 同一张卡，或已证明等价的硬件 revision、VBIOS、HBM 总线/频率和时钟策略；
-- 相同 SGLang commit 和 clean/dirty 状态；如果有 patch，保存完整 diff；
-- 相同 checkpoint repository 和不可变 revision；
-- 相同 `config.json`、`generation_config.json`、`recipe.yaml` 和 MTP 文件；
-- 相同驱动、CUDA、Python、PyTorch、Triton 和 FlashInfer；
-- 相同 prompt 内容、顺序、seed、输出长度、并发和采样参数；
-- 相同功率限制、swap 状态、后台 GPU 进程和 cache 策略；
-- 至少 3 个独立 RUN_ID，并交错或 counterbalance profile 执行顺序。
-
-当前 10G 改 40G 与外部 8G 改 64G 报告属于等级 A，不属于等级 B。
-
-## 固定测试契约
-
-### Checkpoint
+## 标准管线
 
 ```text
-Repository: https://huggingface.co/Avesed/Qwen3.6-27B-INT8-W8A8
-Base model: https://huggingface.co/Qwen/Qwen3.6-27B
+benchmark.env
+    │
+    ├─ collect-run-metadata.py     主机、GPU、软件、模型、权重、量化、数据集
+    ├─ serve-model.sh              通用 SGLang 启动器
+    ├─ capture-profile.py          实际 context/token pool/并发、显存、KV/state/graph
+    ├─ plan-benchmark.py           core + extended 容量计算与跳过原因
+    ├─ bench-serving.sh            固定长度请求
+    ├─ monitor-gpu.sh              NVML 遥测
+    ├─ summarize-expanded.py       serving.csv + power.csv
+    └─ generate-report.py          report.md + report.pdf
 ```
 
-仅写 repository 名称不够。新 run 应记录 Hugging Face commit revision，或对所有
-关键文件记录 SHA-256。至少包括：
-
-```text
-config.json
-generation_config.json
-recipe.yaml
-model.safetensors
-mtp.safetensors
-tokenizer/config/template files
-```
-
-大权重文件计算 SHA-256 较慢时，可以使用 Hugging Face immutable revision 加上
-safetensors 文件的仓库 LFS oid；不能只记录本地目录名。
-
-### SGLang 和 patch
-
-必须记录：
+一键入口：
 
 ```bash
-git -C "$SGLANG_SOURCE" rev-parse HEAD
-git -C "$SGLANG_SOURCE" status --short
-git -C "$SGLANG_SOURCE" diff --binary
+cp configs/benchmark.example.env /tmp/my-benchmark.env
+# 编辑路径、模型、context、MTP 和功率设置
+sudo -E scripts/run-standard-suite.sh /tmp/my-benchmark.env
 ```
 
-如果工作树 dirty，必须把 diff 保存到 run artifact。只写 `SGLang 0.5.16` 无法区分
-官方 tag、170HX patch、`topk1` 修复或本地未提交修改。
+当前 `scripts/test-pipeline.sh` 已覆盖 32/40/64/80 GiB 类实际容量的离线规划、
+标准表格和 PDF 生成；通用启动器和完整运行器在完成首个真实模型端到端 run 前应视为
+候选管线。已有 10G canonical 数据由旧管线产生，不受此状态影响。
 
-### 数据集
+每次运行必须使用新的 `RUN_ID`。已有 bundle 默认拒绝覆盖；只有确认配置完全相同时
+才允许用 `RESUME=1` 恢复未完成项。
 
-Canonical v2 使用：
+## 模型与启动配置
+
+必填项：
 
 ```text
-ShareGPT SHA-256:
-35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4
-
-LongBench-v2 prepared JSONL SHA-256:
-93ecd8a799ba868cfb2a1c28a38ce87653cb30eb211712030970020d39990058
+MODEL_PATH
+MODEL_NAME
+RUN_ID
+SGLANG_VENV
+CONTEXT_LENGTH（可设为 `auto`）
 ```
 
-数据集 hash 不同的 run 不能称为逐请求严格对照。即使 prompt/output token 总数相同，
-也只能标记为“分布匹配”，除非进一步比较规范化后的每行内容 hash。
-
-### Profile
-
-发布表格必须把并发和 MTP 状态写完整，不使用孤立的 `baseline`、`mtp`、`c1` 或
-`c4` 作为面向读者的唯一标签。
-
-| 最大并发 | MTP 状态 | 上下文长度 | 总 token 池 | 静态显存比例 | CUDA Graph batch size | 推测解码 |
-| ---: | --- | ---: | ---: | ---: | --- | --- |
-| 1 | MTP 关闭 | 24576 | 24576 | 0.88 | 1 | 不适用 |
-| 1 | MTP 开启 | 24576 | 24576 | 0.94 | 1 | EAGLE，3 steps，top-k 1，4 draft tokens |
-| 4 | MTP 关闭 | 24576 | 20480 | 0.88 | 1、2、4 | 不适用 |
-| 4 | MTP 开启 | 24576 | 20480 | 0.98 | 1、2、3、4 | EAGLE，3 steps，top-k 1，4 draft tokens |
-
-四个 profile 使用 page size 64、2048-token chunked prefill、4096-token prefill
-上限、关闭 prefill CUDA Graph 和关闭 radix cache。任何偏离都必须放进 run metadata，
-不能静默修改。
-
-### Case 矩阵
-
-单请求长输出每个 cell 完成 3 个请求：
+强烈建议填写：
 
 ```text
-Prompt: 1024, 4096, 8192, 20480
-Requested generation: 1024, 4096, 8192
-Constraint: prompt + generation < 24576
+MODEL_REPOSITORY
+MODEL_REVISION
+SGLANG_SOURCE
+EXPECTED_POWER_LIMIT
 ```
 
-Prefill 每个 cell 完成 3 个请求，每个请求生成 1 token：
-
-```text
-Prompt: 512, 2048, 4096, 8192, 12288, 20480
-```
-
-最大并发 4 每个 cell 完成 20 个请求：
-
-```text
-Prompt: 2048, 4096
-Requested generation: 512, 1024, 2048
-Constraint: 4 * (prompt + generation) <= 20480
-```
-
-真实数据集：
-
-```text
-ShareGPT: 30 requests at maximum concurrency 1, natural output
-ShareGPT: 20 requests at maximum concurrency 4, natural output
-LongBench-v2: 20 requests at maximum concurrency 1, natural 10-token output
-LongBench-v2: same 20 requests, fixed generation 512
-```
-
-完整 run 应得到 56 条 manifest row：50 passed 和 6 skipped-capacity。容量跳过不是
-失败，也不能记为零吞吐。
-
-## 完整执行流程
-
-### 1. 选择不可变 RUN_ID
+自定义模型不应继承 Qwen3.6 专用参数。量化、attention/sampling backend、reasoning
+parser、tool parser 和 `trust_remote_code` 都是显式可选项；只有模型确实需要时才设置。
+没有集成 MTP/EAGLE head 的模型应使用：
 
 ```bash
-export RUN_ID="cmp170hx-$(date +%Y%m%d-%H%M%S)"
-export SGLANG_RUNTIME_HOME=/path/to/sglang-runtime
-export SGLANG_VENV=/path/to/sglang-venv
-export SGLANG_SOURCE=/path/to/sglang-source
-export MODEL_PATH=/path/to/Qwen3.6-27B-INT8-W8A8
-export SHAREGPT_PATH=/path/to/sharegpt.json
-export LONGBENCH_PATH=/path/to/longbench-v2-prepared.jsonl
+MTP_MODES="disabled"
 ```
 
-RUN_ID 一旦产生数据就不能复用于不同配置。重跑必须使用新 RUN_ID；恢复同一个 run
-只允许复用已完成且配置相同的 case。
-
-### 2. 预检
+支持 MTP 且需要比较开关时使用：
 
 ```bash
-nvidia-smi -q -d POWER,CLOCK,MEMORY,PCI
-swapon --show
-nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv
-sha256sum "$SHAREGPT_PATH" "$LONGBENCH_PATH"
-git -C "$SGLANG_SOURCE" status --short
+MTP_MODES="disabled enabled"
+MTP_ALGORITHM=EAGLE
+MTP_STEPS=3
+MTP_TOPK=1
+MTP_DRAFT_TOKENS=4
 ```
 
-硬门禁：
+如果 MTP profile 启动失败，记录为 profile unavailable；不能悄悄改成另一个 draft
+模型、降低并发或减小 token pool 后继续声称参数相同。
 
-- power limit 必须等于声明值；
-- swap 必须为 0；
-- 不能有其他 GPU compute process；
-- 8000 端口不能已有服务；
-- checkpoint、数据集和 SGLang revision 必须记录；
-- 可用主机内存必须足够，不能依赖 swap 或 OOM retry。
+## 容量规则
 
-### 3. 执行全部 case
-
-当前 canonical 250 W 管线：
-
-```bash
-sudo -E env \
-  RUN_ID="$RUN_ID" \
-  RUN_REAL_DATASETS=1 \
-  SGLANG_RUNTIME_HOME="$SGLANG_RUNTIME_HOME" \
-  SGLANG_VENV="$SGLANG_VENV" \
-  SGLANG_SOURCE="$SGLANG_SOURCE" \
-  MODEL_PATH="$MODEL_PATH" \
-  SHAREGPT_PATH="$SHAREGPT_PATH" \
-  LONGBENCH_PATH="$LONGBENCH_PATH" \
-  scripts/run-250w-suite.sh
-```
-
-脚本会逐个 profile 启动服务、查询 `/server_info`、运行 case、停止服务并等待显存释放。
-每个 case 执行 `--flush-cache`；benchmark warmup 为 0，服务启动 warmup 保持开启。
-
-### 4. 监控
-
-`scripts/monitor-gpu.sh` 默认每 200 ms 采集：
+每个 profile 启动后记录：
 
 ```text
-timestamp
-power.draw
-power.limit
-utilization.gpu
-clocks.sm
-clocks.mem
-temperature.gpu
-pstate
+context_length
+max_total_tokens
+effective_max_running_requests
+GPU used/free memory after startup
+target and draft load-phase deltas
+target/draft KV cache size and dtype
+GDN/Mamba/recurrent state size（若日志提供）
+CUDA Graph size
+pool-end free memory
 ```
 
-manifest 的 `start_epoch_ms`、`end_epoch_ms` 和 `telemetry_file` 是 case 到遥测的唯一
-关联。不能按文件名大致截取时间窗，也不能混用另一个 profile 的 telemetry。
-
-### 5. 汇总
-
-```bash
-python3 scripts/summarize-expanded.py \
-  "results/case-manifest-$RUN_ID.csv" \
-  --repo-root "$PWD" \
-  --serving-output "results/serving-$RUN_ID.csv" \
-  --power-output "results/power-$RUN_ID.csv"
-```
-
-三类指标必须保持分离：
-
-- `e2e_output_tok_s`：完成的输出 tokens / benchmark 墙钟时间；
-- `input_tok_s`：完成的输入 tokens / 同一墙钟时间；
-- `1000 / mean TPOT`：只用于最大并发 1 的稳态 decode 近似。
-
-最大并发 4 时不能用 `1000 / TPOT` 代替聚合输出吞吐。
-
-### 6. 验收
-
-发布前逐项检查：
-
-- manifest 正好 56 条数据 row，case key 无重复；
-- 50 条 `passed`、6 条 `skipped-capacity`，没有 `failed` 或 `incomplete`；
-- 每个 passed row 的 JSONL 最后一条汇总记录 `completed == requests`；
-- 固定长度 case 的输入/输出 token 数符合声明；
-- MTP 关闭 row 不应出现 MTP 接受长度；
-- MTP 接受长度必须在合理范围并从原始字段重算；恰好等于 draft 上限的所有 row
-  必须人工复核，避免字段语义或汇总 bug；
-- `/server_info` 中 token pool 和有效最大运行请求数与 profile 相符；
-- 每个 case 时间窗被其 telemetry 覆盖，采样间隔和缺口可接受；
-- 环境文件包含 checkpoint revision、SGLang commit/diff 状态和数据集 hash；
-- README 数字可从发布 CSV 重算，手工转录值应有来源说明。
-
-### 7. 发布 artifact
-
-一个可审计 run 至少发布：
+固定长度 case 必须同时满足：
 
 ```text
-environment/<run-id>.txt
-results/case-manifest-<run-id>.csv
-results/serving-<run-id>.csv
-results/power-<run-id>.csv
+每请求 input_tokens + output_tokens < context_length
+max_concurrency × (input_tokens + output_tokens) <= max_total_tokens
+max_concurrency <= effective_max_running_requests
+```
+
+第一条使用严格小于，因为生成请求还需要至少一个调度/token slot。第二条是共享 token
+pool 的上界。对于真实数据集，必须先 tokenizer 预处理每条请求，再按最长或逐请求
+实际 token 数做相同检查，不能只用字符数估计。
+
+### 不同显存容量如何测试
+
+- **32/40 GiB**：运行所有能通过容量计算的 `core` case；不能运行的长输出保留 skip
+  行。不要为了填满表格而降低实际输入/输出长度。
+- **64/80 GiB**：先完成同样的 `core` case，再运行能通过容量计算的 `extended`
+  case。更长上下文是额外能力数据，不替代 core 对照。
+- **模型不同**：即使 GPU 显存相同，也必须重新启动并重新读取 token pool。不能复制
+  另一模型或另一量化版本的容量。
+
+标准固定矩阵：
+
+| Tier | 工作负载 | 输入 tokens | 输出 tokens | 最大并发 | 重复 |
+| --- | --- | --- | --- | ---: | ---: |
+| core | Prefill | 512、2048、4096、8192、12288、20480 | 1 | 1 | 每点 3 请求 |
+| core | 单请求生成 | 1024、4096、8192、20480 | 1024、4096、8192 | 1 | 每点 3 请求 |
+| core | 并发生成 | 2048、4096 | 512、1024、2048 | 配置值，默认 4 | 5 个完整并发波次 |
+| extended | Prefill | 32768、49152、65536、98304、131072 | 1 | 1 | 每点 3 请求 |
+| extended | 单请求生成 | 32768、49152、65536、98304、131072 | 1024、4096、8192 | 1 | 每点 3 请求 |
+| extended | 并发生成 | 8192、16384、32768 | 512、1024、2048 | 配置值 | 5 个完整并发波次 |
+
+用户可用 JSON `MATRIX_FILE` 增加模型特定矩阵，但不能删除 core 行后仍称为完整 core
+复现。模型原生 context 小于某些 core 点时，这些点自然成为 `skipped-context`。
+
+## 必须采集的元数据
+
+### 测试身份
+
+- RUN_ID、开始时间、时区、测试者和数据作者；
+- benchmark 仓库 commit；
+- SGLang commit、remote、dirty 状态和额外 patch；
+- 所有人工修改过的启动参数。
+
+### GPU 与主机
+
+- GPU 名称、UUID、PCI ID、显存、compute capability、VBIOS；
+- 驱动、功率限制、最高 SM/显存频率；
+- CPU、逻辑核、主机内存、swap、内核和操作系统；
+- tensor parallel、可见 GPU 和测试期间其他 GPU 计算进程。
+
+### 模型
+
+- 本地模型名称、Hugging Face repository 和 immutable revision；
+- architecture、model type、dtype、量化 method/format；
+- 所有 safetensors 文件名、单文件大小和总权重大小；
+- `config.json`、tokenizer、template、recipe 的 SHA-256；
+- 模型原生 context、层数、full-attention 层数、KV heads、head dim、KV dtype；
+- 能够从配置可靠计算时记录理论 target KV bytes/token；否则留空，不猜测；
+- MTP 权重、层数、draft 参数和是否共享 embedding。
+
+### 运行时显存
+
+磁盘权重大小和 GPU 常驻显存是两个不同指标，必须分开。运行时表至少包括 target/draft
+加载阶段增量、KV cache、GDN/Mamba state、CUDA Graph、启动后 GPU used/free 和
+token pool。日志无法拆分的 allocator/context/workspace 不能强行凑成显存总和。
+
+## 指标与表格
+
+必须分开使用以下指标：
+
+- `input tok/s`：完成的 prompt tokens / 完整 benchmark 请求窗口；
+- `output tok/s`：完成的 generated tokens / 同一窗口；最大并发大于 1 时是服务器聚合吞吐；
+- `TTFT`：首 token 延迟，越低越好；
+- `TPOT`：首 token 后的每输出 token 延迟，越低越好；
+- `1000 / mean TPOT`：只可称为单请求持续 decode 近似；并发时不能代替聚合吞吐；
+- MTP acceptance：只出现在 MTP 开启数据，并应与 draft 上限一起解释。
+
+标准报告顺序：
+
+1. 运行摘要和模型/GPU 环境；
+2. profile 实际 context、token pool、并发和显存/KV/state；
+3. passed/skipped/failed 计数；
+4. MTP 开启/关闭同 cell 加速比；
+5. 完整 core 表；
+6. extended 长上下文表；
+7. 真实数据集；
+8. 遥测与限制。
+
+不得只写“关闭 / 1024 / c1”。应写成“最大并发 1，MTP 关闭，端到端输出吞吐
+(output tok/s)”。容量 skip 的吞吐字段保持空白。
+
+## 运行门禁与监控
+
+开始前必须确认：
+
+- swap 为 0；
+- 没有其他 GPU compute process；
+- 目标端口没有现存服务；
+- 功率限制与配置一致；
+- 模型、SGLang 和数据集身份已记录；
+- 新 RUN_ID 不覆盖已有产物。
+
+每个 profile 使用独立服务日志与独立 NVML 遥测。默认约 200 ms 采样时间、功耗、
+功率限制、GPU 利用率、SM/显存频率、温度和 P-state。case manifest 中的毫秒时间窗
+是遥测切片的唯一依据。
+
+## 标准发布包
+
+```text
+runs/<run-id>/
+├── metadata.json
+├── profiles/*.json
+├── plans/*.csv
+├── case-manifest.csv
+├── serving.csv
+├── power.csv
+├── report.md
+└── report.pdf
+
 results/raw/<run-id>/*.jsonl
 results/logs/<run-id>/*.log
 results/telemetry/<run-id>/*.csv
-patches/<run-id>-sglang.diff       # 仅在 source dirty 或有额外 patch 时
 ```
 
-如果 raw artifact 太大而不放 Git，必须发布可下载归档、SHA-256 和生成命令。只有 PDF
-或 Markdown 摘要的外部结果可以引用，但必须标记为“不可从本仓库重算”。
+`report.md` 和 `report.pdf` 由 `generate-report.py` 从上述结构化数据生成。PDF 是便于
+阅读的发布件；CSV、JSONL、profile JSON 和 metadata 才是可重算的数据源。大文件不
+上传 Git 时，应发布归档下载地址与 SHA-256。
 
-## 跨 run 比较规则
+## 验收标准
 
-比较脚本或 AI 必须先按以下字段连接，而不是按表格行号：
+一次 run 可以包含不同数量的 passed/skip 行，不能再用固定“56 行、50 passed”验收。
+发布前必须满足：
 
-```text
-workload
-prompt/input length
-requested output length
-maximum concurrency
-MTP state
-sampling parameters
-dataset SHA
-```
+- 每个 plan case 在 manifest 中有唯一终态；
+- 终态只能是 `passed`、明确的 skip、`failed` 或 `incomplete`；
+- 每个 passed JSONL 的 `completed == requests`；
+- skip 原因包含实际 required tokens 与实际 context/token pool；
+- profile JSON 的实际并发不少于该 profile 声明并发；
+- metadata 有模型、GPU、软件和 SGLang 身份；
+- 每个 passed case 的时间窗有对应遥测；
+- Markdown 表和 PDF 来自同一 bundle；
+- `git diff --check`、Bash 语法、Python 编译和容量规划 fixture 全部通过。
 
-然后检查环境差异。任何不相同字段都应列为 confounder。不得：
+存在 `failed` 或 `incomplete` 时仍可发布为部分结果，但标题和摘要必须明确写
+“partial run”，不能把缺失 cell 当作容量跳过。
 
-- 把 `MTP 开启 / MTP 关闭` 加速比和 `机器 B / 机器 A` 吞吐比混为一谈；
-- 把 input tok/s、output tok/s 和 steady decode tok/s 放在同一列比较；
-- 把 LongBench 10-token 自然输出当成 decode benchmark；
-- 把容量跳过写成失败或 0 tok/s；
-- 因为 checkpoint 名称相同就假定文件相同；
-- 因为 SGLang version 相同就忽略 commit 和 patch；
-- 将更多显存容量直接解释为更高吞吐。
+## 跨机器比较
 
-## 面向 AI agent 的操作约束
+只连接完全匹配的：模型 repository/revision、profile 参数、workload、input、output、
+最大并发、MTP 状态、sampling 参数和数据集内容。然后列出 GPU、SGLang、驱动、功率、
+时钟、KV dtype 和 backend 差异。
 
-1. 先读本文件、主 README、环境文件、manifest 和 summarizer，再解释数据。
-2. 未经用户明确要求，不启动长 benchmark，也不覆盖已有 RUN_ID。
-3. 不修改或删除用户已有 raw/log/telemetry；新 run 使用新目录。
-4. 摘要外部报告时同时保留作者、日期、RUN_ID、源文件 hash 和“是否有 raw data”。
-5. 所有计算值必须注明公式；所有转录值必须注明来源页/表或源 CSV。
-6. 发现指标歧义时使用完整标签，例如“最大并发 4、MTP 开启、聚合输出吞吐”。
-7. 提交前运行 Markdown 表格列数检查、`git diff --check`、`shellcheck scripts/*.sh`
-   和 `python3 -m py_compile scripts/*.py`。
-
-10G 改 40G 与外部 8G 改 64G 的结构化对照见
-[`README.zh-CN.md`](README.zh-CN.md)。
+更多显存通常意味着能运行更长上下文或更大并发，不自动意味着相同 case 更快。
+MTP 加速比也不能与机器 B / 机器 A 的吞吐比混为一谈。

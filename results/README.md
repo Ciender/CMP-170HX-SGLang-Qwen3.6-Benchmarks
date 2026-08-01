@@ -1,5 +1,11 @@
 # CMP 170HX 10G Result Data
 
+This directory preserves the published 10G canonical data. New model-neutral
+runs use `scripts/run-standard-suite.sh` and write their publication bundle to
+`runs/<run-id>/`; raw JSONL, server logs, and NVML streams remain under
+`results/raw/<run-id>/`, `results/logs/<run-id>/`, and
+`results/telemetry/<run-id>/`.
+
 The canonical public dataset is `expanded-250w-v2-20260731`:
 
 ```text

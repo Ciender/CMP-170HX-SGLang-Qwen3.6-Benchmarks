@@ -91,6 +91,26 @@ The LongBench-v2 10-token case is dominated by long-prompt prefill and should
 not be used as a sustained decode result. Its fixed 512-token counterpart
 shows the generation-stage benefit of MTP more clearly.
 
+## How to test
+
+Copy the example configuration, set SGLang, model, context, MTP, and power
+parameters, then run the standard pipeline:
+
+```bash
+cp configs/benchmark.example.env /tmp/my-benchmark.env
+sudo -E scripts/run-standard-suite.sh /tmp/my-benchmark.env
+```
+
+The pipeline reads the live SGLang token pool and evaluates every
+input/output/concurrency combination. Smaller-memory systems retain explicit
+capacity skips; larger systems continue into the extended long-context matrix.
+`runs/<RUN_ID>/` contains metadata, capacity/GPU-memory/KV records, CSV,
+Markdown, and PDF. See the [benchmark protocol](CMP-170HX-Benchmark-Protocol.md)
+for custom models and required fields; AI agents must also follow
+[`AGENTS.md`](AGENTS.md). Capacity planning and CSV/Markdown/PDF generation
+have offline fixture coverage; the new generic launcher and runner still need
+their first live-model end-to-end qualification.
+
 ## Interpreting the difference
 
 Final memory capacity determines whether the model, KV/GDN state, CUDA Graphs,
@@ -112,13 +132,14 @@ specification or final 64 GiB capacity caused the corresponding speedup.
 CMP-170HX-10G.md              complete 10G results, environment, memory, reproduction
 CMP-170HX-8G.md               complete 8G results and telemetry
 scripts/                      launch, benchmark, monitoring, and summary tools
+configs/                      standard pipeline configuration template
+runs/<run-id>/                generated metadata, plans, CSV, Markdown, PDF
 environment/                  measured 10G environment records
 results/                      10G summary CSVs and raw NVML telemetry
 ```
 
-The draft test protocol remains in
-[`CMP-170HX-Benchmark-Protocol.md`](CMP-170HX-Benchmark-Protocol.md). It is not
-currently presented as a completed automated pipeline.
+The complete execution and publication contract is in
+[`CMP-170HX-Benchmark-Protocol.md`](CMP-170HX-Benchmark-Protocol.md).
 
 ## License and acknowledgements
 

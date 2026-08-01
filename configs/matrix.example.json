@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "tier": "custom",
+      "workload": "generation",
+      "input_tokens": 24576,
+      "output_tokens": 2048,
+      "max_concurrency": 1,
+      "requests": 3
+    },
+    {
+      "tier": "custom",
+      "workload": "concurrent_generation",
+      "input_tokens": 6144,
+      "output_tokens": 1024,
+      "max_concurrency": 4,
+      "requests": 20
+    }
+  ]
+}
