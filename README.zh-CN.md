@@ -7,6 +7,10 @@
 （MTP 开启）对照测试。标准运行的设定功率上限为 250 W。本文所有表格都来自标准运行
 `expanded-250w-v2-20260731`。
 
+相关文档：
+[`64 GiB 外部复现对照`](COMPARISON-64GB.zh-CN.md) |
+[`完整 Benchmark 管线与发布协议`](BENCHMARK-PROTOCOL.zh-CN.md)
+
 ## 测试结果
 
 ### 主要结论
@@ -324,8 +328,9 @@ benchmark warmup 设为 0，是为了规避该 SGLang 版本中实测到的一�
 | `baseline-c4` | 24576 | 20480 | 4 | 0.88 | MTP 关闭 | 不适用 |
 
 四个 profile 都使用 page size 64、2048-token chunked prefill、4096-token
-prefill 上限，并关闭 prefill CUDA Graph。最大并发 4 的 `mtp-c4` 和
-`baseline-c4` 捕获 batch size 1、2、3、4 的 decode graph。
+prefill 上限，并关闭 prefill CUDA Graph。最大并发 4 且 MTP 开启的 profile
+捕获 batch size 1、2、3、4 的 decode graph；最大并发 4 且 MTP 关闭的 profile
+捕获 batch size 1、2、4。
 
 `mtp-c4` 的静态显存比例 0.98 是实测选择：使用 0.94 时，SGLang 会把有效并发
 从 4 自动降到 1；0.98 配合 24,576 token 池时，MTP worker 内存分配失败；

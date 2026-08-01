@@ -7,6 +7,10 @@ Single-GPU `baseline` (MTP disabled) versus `mtp` (MTP enabled) serving results 
 SGLang 0.5.16 at a configured 250 W power limit. The canonical run is
 `expanded-250w-v2-20260731`; all tables below come from that run.
 
+Related documents:
+[`64 GiB external reproduction comparison`](COMPARISON-64GB.md) |
+[`complete benchmark pipeline and publication protocol`](BENCHMARK-PROTOCOL.md)
+
 ## Benchmark results
 
 ### Headline findings
@@ -358,9 +362,9 @@ milliseconds and the unique telemetry segment used by each profile start.
 | `baseline-c4` | 24576 | 20480 | 4 | 0.88 | MTP disabled | Not applicable |
 
 All four profiles use page size 64, 2048-token chunked prefill, a 4096-token
-prefill ceiling, and disabled prefill CUDA Graph. The maximum-concurrency-four
-profiles, `mtp-c4` and `baseline-c4`, capture decode graphs for batch sizes 1,
-2, 3, and 4.
+prefill ceiling, and disabled prefill CUDA Graph. The maximum-concurrency-four,
+MTP-enabled profile captures decode graphs for batch sizes 1, 2, 3, and 4. The
+maximum-concurrency-four, MTP-disabled profile captures batch sizes 1, 2, and 4.
 
 The `mtp-c4` static-memory fraction of 0.98 is intentional. At 0.94, SGLang
 reduced effective concurrency to one. At 0.98 with a 24,576-token pool, MTP
